@@ -1,0 +1,20 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 运行期数据（由 DSH 宿主写入 storages/，不在仓库内）
+generations/
+outbox/
+summaries/
+*.log
+
+# 临时目录（见 doc/版本变更记录.md 约束：测试脚本/临时文件只放 tmp/，禁止进 git）
+tmp/
+*.tmp
+*.bak
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

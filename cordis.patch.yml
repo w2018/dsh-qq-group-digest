@@ -1,0 +1,57 @@
+# 组合包（bundle）patch 层：profile 的 dsh.profile.bundles 列出本包时，往插件树里插一行。
+# 行 id 用于覆盖/禁用，与包名无关；name 必须是包名，Node 才解析得到代码。
+- insert:
+    - id: qq-group-digest
+      name: "dsh-qq-group-digest"
+      config:
+        # ── NapCat OneBot11 连接 ──────────────────────────────────
+        # 对应 onebot11_<uin>.json 里的 network.websocketServers 条目
+        napcat:
+          wsUrl: "ws://127.0.0.1:3001"
+          token: ""                 # 与 NapCat websocketServers.token 完全一致
+          reconnectMs: [1000, 30000]
+          callTimeoutMs: 30000
+
+        # ── 监听目标 ─────────────────────────────────────────────
+        listen:
+          groups: []                # 必填：群号字符串数组，如 ["100000001"]
+          ignoreSelf: true          # 忽略本账号自己发的消息
+
+        # ── 批次触发 ─────────────────────────────────────────────
+        batch:
+          threshold: 100            # 每群累计多少条触发一次总结
+          freezeGraceMs: 2000       # 达阈值后的宽限期，抗乱序抖动
+          maxBuffer: 500            # 单群内存上限，超了强制冻结
+          maxWaitMs: 3600000        # 兜底：不足阈值时最长等 1 小时
+          perGroupOverride: {}      # 可选，按群覆盖：{"123456789": {"threshold": 50}}
+
+        # ── 模型 ─────────────────────────────────────────────────
+        # 留空 provider/model 则回退到 DSH 系统设置里的默认模型
+        model:
+          provider: ""              # 留空 = 用 DSH 系统设置里的默认模型
+          model: ""                 # 必须与 provider 同时留空或同时填写
+          temperature: 0.3
+          maxTokens: 1200
+          timeoutMs: 120000
+          maxInputChars: 12000
+          retries: 3
+          backoffMs: 2000
+          fallbackToDefault: true   # 显式路由失效时退回 DSH 默认模型
+
+        # ── 投递 ─────────────────────────────────────────────────
+        delivery:
+          friends: []               # 必填：接收私聊的好友 QQ 号字符串数组
+          retry: { attempts: 3, backoffMs: 2000 }
+          maxCharsPerMessage: 1800
+          sendIntervalMs: 800
+          aggregateWindowMs: 5000   # 多群批次在此时窗内合并成一条报告
+
+        # ── 存储 ─────────────────────────────────────────────────
+        storage:
+          dir: ""                   # 留空 = $DSH_HOME/storages/qq-digest
+          keepDays: 7
+
+        ui:
+          sidebarEntry: false       # true = DSH 主界面左侧边栏挂一行「QQ 群总结」入口
+
+        dryRun: true                # true = 只写 outbox 文件，不发 QQ（首次安装先预演）
