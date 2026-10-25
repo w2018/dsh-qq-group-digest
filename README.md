@@ -205,12 +205,16 @@ dsh-qq-group-digest/
 | :--- | :--- | :---: |
 | 设置项（阈值、群号、模型、dryRun…） | 设置页点「保存并生效」 | ❌ 不要 |
 | `client.js` | 刷新页面（F5） | ❌ 不要 |
-| `index.js` / `lib/**` | 设置页点「热重载插件」 | ❌ 不要 |
+| `lib/pipeline.js` `lib/summarize/**` `lib/deliver/**` `lib/store/**` `lib/config.js` | 设置页点「热重载插件」 | ❌ 不要 |
+| `index.js`、`lib/http/**` | 设置页点「热重载插件」**不够**，要重启 DSH | ✅ 要 |
 | `cordis.patch.yml` / `package.json` / 依赖 | 重启 DSH | ✅ 要 |
 
-> 热重载的做法是把 `lib/` 整棵树复制到 `generations/` 再 `import`，绕过 Node 的 ESM 缓存；
+> 热重载的做法是把 `lib/` 整棵树复制到 `generations/` 再 `import` 其中的 `runtime.js`，绕过 Node 的 ESM 缓存；
 > 新一代起来之后才停旧的，未总结消息经 `snapshotPending` / `restorePending` 继承。
-> 但 **新增路由 / 改动 `apply()` 装配逻辑**属于 `index.js` 本身，这类改动仍需重启一次 DSH。
+>
+> 但热重载只换 **Runtime 及其下游**。`index.js` 在启动时静态导入的模块（`lib/http/server.js`、`lib/http/api.js`、
+> `lib/store/logs.js`、`lib/summarize/prompt-store.js` 等）**仍绑定在进程里的旧实例上** ——
+> 改这些文件（尤其是网页服务的路由与静态资源）必须重启一次 DSH 才会生效。
 
 ---
 
