@@ -42,6 +42,19 @@ test('storageRoot 支持自定义目录', () => {
   assert.equal(storageRoot({ storage: { dir: 'D:/tmp/x' } }), 'D:/tmp/x')
   assert.match(storageRoot({ storage: { dir: '' } }), /qq-digest$/)
 })
+test('resolveConfig 清洗 keywords 与 excludedSenders', () => {
+  const { config } = resolveConfig({
+    listen: { groups: ['1', '100'], keywords: ['广告', '广告', ''], excludedSenders: { '100': ['200', ''], '200': [], '999': ['5'] } },
+    delivery: { friends: ['2'] },
+  })
+  assert.deepEqual(config.listen.keywords, ['广告'])
+  // 999 不在监听列表 → 孤儿条目被丢弃；200 空列表 → 丢弃
+  assert.deepEqual(config.listen.excludedSenders, { '100': ['200'] })
+  // 关键词保留原始大小写（UI 回显一致），匹配时才忽略大小写
+  const { config: c2 } = resolveConfig({ listen: { groups: ['1'], keywords: ['VPN'] }, delivery: { friends: ['2'] } })
+  assert.deepEqual(c2.listen.keywords, ['VPN'])
+})
+
 test('resolveConfig ui.sidebarEntry 默认为 false', () => {
   const { config } = resolveConfig({ listen: { groups: ['1'] }, delivery: { friends: ['2'] } })
   assert.equal(config.ui.sidebarEntry, false)

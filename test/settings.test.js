@@ -24,6 +24,23 @@ test('pickEditable 带出 ui.sidebarEntry 与历史相关字段', () => {
   assert.equal(picked.napcat.wsUrl, 'ws://x')
 })
 
+test('sanitizeOverride 保留 keywords 与 excludedSenders，并报告被丢弃的未知字段', () => {
+  const got = sanitizeOverride({
+    listen: { keywords: ['广告'], excludedSenders: { '1': ['2'] }, bogusField: 1 },
+    totallyUnknown: 'x',
+  })
+  assert.deepEqual(got.override.listen.keywords, ['广告'])
+  assert.deepEqual(got.override.listen.excludedSenders, { '1': ['2'] })
+  // 未知字段必须出现在 dropped 里，前端才能提示「未生效」而不是假成功
+  assert.ok(got.dropped.includes('totallyUnknown'), '未知顶层字段必须被报告')
+  assert.ok(!got.override.totallyUnknown)
+})
+
+test('sanitizeOverride 类型不符的已知字段也计入 dropped', () => {
+  const got = sanitizeOverride({ listen: { excludedSenders: ['不是对象'] } })
+  assert.ok(got.dropped.includes('listen.excludedSenders'))
+})
+
 test('pickEditable 缺字段时不凭空造出 ui 节点', () => {
   const picked = pickEditable({ napcat: { wsUrl: 'ws://x' } })
   assert.equal(picked.ui, undefined)

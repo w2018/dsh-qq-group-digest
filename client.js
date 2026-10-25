@@ -24,6 +24,8 @@ window.__ModuleLoader__.load({
     const SLOT_SIDEBAR_PANEL = 'sidebar.panellist'
     const SLOT_SIDEBAR_FOOTER = 'sidebar.footer.action'
     const API = '/api/qq-digest'
+    // 与 index.js 的 BACKEND_VERSION 保持一致：不一致说明后端仍是旧代码，需要重启一次 DSH。
+    const EXPECTED_BACKEND_VERSION = 3
 
     /** 样式必须带 data-plugin 归属标记，否则 DSH 的 claimStyles 会算到别的插件头上。 */
     function injectStyles() {
@@ -64,6 +66,13 @@ window.__ModuleLoader__.load({
         '.qqd-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 4px; }',
         '.qqd-pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.6; max-height: 220px; overflow: auto; padding: 10px; border-radius: 8px; background: rgba(127,127,127,0.07); font-family: ui-monospace, Consolas, monospace; }',
         '.qqd-note { font-size: 11.5px; opacity: .5; line-height: 1.6; }',
+  '.qqd-member-box { width: 100%; max-height: 180px; overflow-y: auto; border: 1px solid var(--dsh-border, rgba(128,128,128,.25)); border-radius: 8px; box-sizing: border-box; }',
+  '.qqd-member-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0 10px; height: 28px; box-sizing: border-box; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }',
+  '.qqd-member-row:hover { background: rgba(128,128,128,.12); }',
+  '.qqd-member-row + .qqd-member-row { border-top: 1px solid rgba(128,128,128,.12); }',
+  '.qqd-member-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+  '.qqd-member-id { opacity: .55; font-variant-numeric: tabular-nums; flex: none; }',
+  '.qqd-member-empty { padding: 10px; font-size: 11.5px; opacity: .5; }',
         '.qqd-card-title[data-clickable="true"] { cursor: pointer; user-select: none; }',
         '.qqd-card-title[data-clickable="true"]:hover { opacity: 1; }',
         '.qqd-caret { display: inline-block; width: 11px; font-size: 10px; opacity: .55; }',
@@ -259,6 +268,150 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 信息过滤·按成员排除编辑器：选群 → 搜索并挑选成员 → 芯片展示每个群的排除名单。 */
+    function MemberFilterEditor(props) {
+      const [pickGroup, setPickGroup] = useState('')
+      const [members, setMembers] = useState({ available: [], error: '', loading: false })
+      const [query, setQuery] = useState('')
+      const [draft, setDraft] = useState('')
+      const map = props.value && typeof props.value === 'object' ? props.value : {}
+      const listening = Array.isArray(props.listening) ? props.listening : []
+      const groupNames = props.groupNames || {}
+
+      const loadMembers = useCallback(function (gid) {
+        if (!gid) return
+        setMembers(function (prev) { return Object.assign({}, prev, { loading: true, error: '' }) })
+        api('/members?groupId=' + encodeURIComponent(gid))
+          .then(function (d) {
+            setMembers({ available: d.available || [], error: d.error || '', loading: false })
+          })
+          .catch(function (e) {
+            const raw = e && e.message ? e.message : String(e)
+            // unknown route 只会在「后端还是旧代码」时出现：/members 路由随插件一起载入，改后端必须重启 DSH。
+            const msg = /unknown route/i.test(raw)
+              ? '接口未注册（后端仍是旧代码），请重启一次 DSH 后再试'
+              : raw
+            setMembers({ available: [], error: msg, loading: false })
+          })
+      }, [])
+
+      const labelOf = function (gid) {
+        return groupNames[gid] || gid
+      }
+      const addMember = function (gid, userId) {
+        if (!gid || !userId) return
+        const list = Array.isArray(map[gid]) ? map[gid] : []
+        const s = String(userId)
+        if (list.indexOf(s) >= 0) return
+        const next = Object.assign({}, map)
+        next[gid] = list.concat([s])
+        props.onChange(next)
+      }
+      const removeMember = function (gid, userId) {
+        const list = Array.isArray(map[gid]) ? map[gid] : []
+        const next = list.filter(function (x) { return x !== userId })
+        const out = Object.assign({}, map)
+        if (next.length > 0) out[gid] = next
+        else delete out[gid]
+        props.onChange(out)
+      }
+
+      const filtered = members.available.filter(function (m) {
+        if (!query) return true
+        const q = query.toLowerCase()
+        return m.userId.indexOf(q) >= 0 || (m.nickname || '').toLowerCase().indexOf(q) >= 0 || (m.card || '').toLowerCase().indexOf(q) >= 0
+      })
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+        Object.keys(map).length > 0
+          ? h('div', { className: 'qqd-chips' },
+              Object.keys(map).sort().map(function (gid) {
+                return (map[gid] || []).map(function (uid) {
+                  return h('span', { className: 'qqd-chip', key: gid + ':' + uid },
+                    h('span', null, labelOf(gid) + ' · ' + uid),
+                    h('button', { type: 'button', title: '移除', onClick: function () { removeMember(gid, uid) } }, '×'),
+                  )
+                })
+              }),
+            )
+          : h('div', { className: 'qqd-note' }, '未排除任何成员，全部发言计入总结'),
+        h('div', { className: 'qqd-inline' },
+          h('select', {
+            className: 'qqd-select',
+            style: { flex: '1 1 200px' },
+            value: pickGroup,
+            onChange: function (e) {
+              const gid = e.target.value
+              setPickGroup(gid)
+              setMembers({ available: [], error: '', loading: false })
+              setQuery('')
+              if (gid) loadMembers(gid)
+            },
+          },
+            h('option', { value: '' }, props.groupSelectLabel || '选择要配置的群…'),
+            listening.map(function (gid) {
+              return h('option', { key: gid, value: gid }, labelOf(gid))
+            }),
+          ),
+        ),
+        pickGroup
+          ? (members.loading
+              ? h('div', { className: 'qqd-note' }, '正在拉取成员列表…')
+              : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                  members.error
+                    ? h('div', { className: 'qqd-note' }, '拉取成员失败：' + members.error)
+                    : null,
+                  h('input', {
+                    className: 'qqd-input',
+                    placeholder: '快速搜索成员（昵称 / 群名片 / QQ 号）',
+                    value: query,
+                    onChange: function (e) { setQuery(e.target.value) },
+                  }),
+                  filtered.length > 500
+                    ? h('div', { className: 'qqd-note' }, '共 ' + filtered.length + ' 人，仅显示前 500 个，可用上方搜索缩小范围')
+                    : null,
+                  filtered.length === 0
+                    ? h('div', { className: 'qqd-member-empty' },
+                        members.available.length === 0 ? '该群没有拉到成员数据' : '没有匹配「' + query + '」的成员')
+                    : h('div', { className: 'qqd-member-box', role: 'listbox' },
+                        filtered
+                          .filter(function (m) { return (map[pickGroup] || []).indexOf(m.userId) < 0 })
+                          .slice(0, 500)
+                          .map(function (m) {
+                            const name = m.card || m.nickname || m.userId
+                            return h('button', {
+                              className: 'qqd-member-row', type: 'button', key: m.userId, role: 'option',
+                              title: '排除 ' + name + '（' + m.userId + '）',
+                              onClick: function () { addMember(pickGroup, m.userId); setQuery('') },
+                            },
+                              h('span', { className: 'qqd-member-name' }, name),
+                              h('span', { className: 'qqd-member-id' }, m.userId),
+                            )
+                          }),
+                      ),
+                ))
+          : null,
+        h('div', { className: 'qqd-inline' },
+          h('input', {
+            className: 'qqd-input',
+            style: { flex: '1 1 160px', minWidth: 140 },
+            value: draft,
+            placeholder: '成员不在列表？直接输入 QQ 号',
+            onChange: function (e) { setDraft(e.target.value) },
+            onKeyDown: function (e) {
+              if (e.key === 'Enter') { e.preventDefault(); if (pickGroup) addMember(pickGroup, draft); setDraft('') }
+            },
+          }),
+          h('button', {
+            className: 'qqd-btn', type: 'button',
+            disabled: !pickGroup,
+            title: pickGroup ? '' : '请先在上面选择一个群',
+            onClick: function () { addMember(pickGroup, draft); setDraft('') },
+          }, '排除'),
+        ),
+      )
+    }
+
     function SettingsPage() {
       const [loading, setLoading] = useState(true)
       const [saving, setSaving] = useState(false)
@@ -354,12 +507,44 @@ window.__ModuleLoader__.load({
         } catch (e) { /* 状态面板不是关键路径 */ }
       }, [])
 
+      const refreshRecent = useCallback(async function () {
+        try {
+          const d = await api('/recent')
+          if (aliveRef.current) setRecent(d.recent || [])
+        } catch (e) { /* 同上，静默 */ }
+      }, [])
+
+      // 轻量轮询：状态与最近报告 5s 刷新一次，避免「改完配置要切页才能看到」。
+      // 只拉只读数据（status/recent），不拉 /settings，避免覆盖用户正在编辑的表单；
+      // saving/busy 期间跳过，且用 ref 防止上一轮未完成时叠加请求。
+      const pollBusyRef = useRef(false)
+      useEffect(function () {
+        const timer = setInterval(async function () {
+          if (!aliveRef.current || pollBusyRef.current) return
+          if (saving || busy) return
+          pollBusyRef.current = true
+          try {
+            await refreshStatus()
+            await refreshRecent()
+          } finally {
+            pollBusyRef.current = false
+          }
+        }, 5000)
+        return function () { clearInterval(timer) }
+      }, [saving, busy, refreshStatus, refreshRecent])
+
       const save = useCallback(async function () {
         if (!form) return
         setSaving(true)
         try {
           const res = await postJson('/settings', { settings: form })
-          flash('已保存并热重载，无需重启 DSH（第 ' + (res.restarts || 1) + ' 次应用）')
+          const dropped = res.droppedFields || []
+          if (dropped.length > 0) {
+            // 有字段被后端丢弃：绝不能报「已保存」，否则就是假成功。
+            flash('部分字段未生效（后端不识别）：' + dropped.join('、') + '。请重启一次 DSH 后重试。', 'error')
+          } else {
+            flash('已保存并热重载，无需重启 DSH（第 ' + (res.restarts || 1) + ' 次应用）')
+          }
           await loadAll()
           await refreshStatus()
         } catch (error) {
@@ -443,9 +628,22 @@ window.__ModuleLoader__.load({
 
       const wsOk = Boolean(status && status.wsConnected)
       const errs = (status && status.configErrors) || []
+      // 群号 → 群名映射：优先协议端群列表，退回运行态里已见过的群名。
+      const groupMap = {}
+      ;(groups.available || []).forEach(function (g) { groupMap[String(g.groupId)] = g.groupName || String(g.groupId) })
+      const liveGroups = (live && live.pipeline && live.pipeline.groups) || []
+      liveGroups.forEach(function (g) {
+        const k = String(g.groupId)
+        if (!groupMap[k] && g.groupName) groupMap[k] = g.groupName
+      })
       const providerOpts = models.providers || []
       const currentProvider = (form.model && form.model.provider) || ''
       const modelOptions = (providerOpts.find(function (p) { return String(p.id) === String(currentProvider) }) || {}).models || []
+
+      // 后端版本不一致 = 磁盘代码比运行中的进程新，新路由 / 新白名单还没生效。
+      const staleBackend = meta && typeof meta.backendVersion === 'number'
+        ? meta.backendVersion !== EXPECTED_BACKEND_VERSION
+        : true
 
       return h('div', { className: 'qqd-root' },
         h('div', { className: 'qqd-head' },
@@ -454,6 +652,11 @@ window.__ModuleLoader__.load({
             '监听指定 QQ 群，按阈值批次调用 DSH 已配置的模型生成总结，按群组织后私聊推送给指定好友。此页保存后立即生效，不需要重启 DSH。',
           ),
         ),
+
+        staleBackend
+          ? h('div', { className: 'qqd-tip', 'data-kind': 'error' },
+              '后端仍是旧代码（运行中的进程没载入最新的路由与字段白名单），新增设置项可能保存不生效或拉取失败。请重启一次 DSH。')
+          : null,
 
         h(Card, {
           title: '运行状态',
@@ -538,6 +741,36 @@ window.__ModuleLoader__.load({
               checked: form.listen && form.listen.ignoreSelf,
               label: '不计入自己的消息',
               onChange: function (v) { patch('listen.ignoreSelf', v) },
+            }),
+          ),
+        ),
+
+        h(Card, {
+          title: '信息过滤',
+          open: Boolean(openCards.filters),
+          onToggle: function () { toggleCard('filters') },
+        },
+          h(Field, {
+            label: '关键词过滤（模糊匹配）',
+            hint: '消息文本包含任一关键词（不区分大小写）就被丢弃，不进入总结。回车或点添加。',
+          },
+            h(IdListEditor, {
+              value: form.listen && form.listen.keywords,
+              onChange: function (v) { patch('listen.keywords', v) },
+              emptyText: '未设置关键词，不过滤',
+              placeholder: '输入关键词后回车',
+            }),
+          ),
+          h(Field, {
+            label: '按成员排除（不总结这些人）',
+            hint: '先选群拉成员列表，再搜索选择要排除的成员；他们的发言不计入总结批次。',
+          },
+            h(MemberFilterEditor, {
+              value: form.listen && form.listen.excludedSenders,
+              onChange: function (v) { patch('listen.excludedSenders', v) },
+              listening: form.listen && form.listen.groups,
+              groupNames: groupMap,
+              groupSelectLabel: '选择要配置的群…',
             }),
           ),
         ),

@@ -46,6 +46,26 @@ test('normalizeEvent 忽略自己发的可关闭', () => {
   assert.ok(r.record)
 })
 
+test('normalizeEvent 关键词模糊过滤（大小写不敏感）', () => {
+  const base = { groups: new Set(['100000001']), selfId: '100000000', keywords: ['广告', 'VPN'] }
+  assert.equal(normalizeEvent(makeEvent({ text: '欢迎加群看广告', msgId: '2001' }), base).dropped, 'keyword')
+  assert.equal(normalizeEvent(makeEvent({ text: '需要 vpn 的找我', msgId: '2002' }), base).dropped, 'keyword')
+  assert.ok(normalizeEvent(makeEvent({ text: '正常聊天', msgId: '2003' }), base).record)
+  // 无文本（纯图片）不做关键词匹配
+  assert.ok(base && normalizeEvent(makeEvent({ text: '', msgId: '2004' }), base))
+})
+
+test('normalizeEvent 按成员排除（分群生效）', () => {
+  const base = {
+    groups: new Set(['100000001', '100000002']),
+    selfId: '100000000',
+    excludedSenders: { '100000001': ['666'] },
+  }
+  assert.equal(normalizeEvent(makeEvent({ groupId: '100000001', userId: 666, msgId: '3001' }), base).dropped, 'excluded-sender')
+  assert.ok(normalizeEvent(makeEvent({ groupId: '100000002', userId: 666, msgId: '3002' }), base).record)
+  assert.ok(normalizeEvent(makeEvent({ groupId: '100000001', userId: 777, msgId: '3003' }), base).record)
+})
+
 test('DedupSet 命中即去重，容量满淘汰最旧', () => {
   const d = new DedupSet(3)
   assert.equal(d.add('a'), true)

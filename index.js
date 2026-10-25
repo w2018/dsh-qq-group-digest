@@ -19,6 +19,7 @@
  *   POST /api/qq-digest/settings/reset    清空覆盖，回到 patch 初始值
  *   GET  /api/qq-digest/models            列出 DSH 里可选的 provider/model
  *   GET  /api/qq-digest/groups            已监听的群 + NapCat 群列表（用于下拉选群）
+ *   GET  /api/qq-digest/members?groupId=  指定群成员列表（用于按成员过滤下拉）
  *   GET  /api/qq-digest/friends           NapCat 好友列表（用于下拉选接收人）
  *   POST /api/qq-digest/flush             立即冻结所有群并总结投递
  *   POST /api/qq-digest/reload            热重载：载入新一代 lib/ 代码并重建运行态
@@ -44,6 +45,13 @@ import { Runtime } from './lib/runtime.js'
 import { getSvc } from './lib/summarize/summarize.js'
 
 export const name = 'qq-group-digest'
+
+/**
+ * 后端代码版本：只在 index.js / 路由层 / lib 契约发生「热重载换不掉」的改动时递增。
+ * 设置页拿它和前端期望值比对，不一致就提示「后端是旧代码，需重启 DSH」——
+ * 因为热重载只替换 Runtime，不重新 import index.js 的路由表。
+ */
+const BACKEND_VERSION = 3
 
 // 只声明 webServer：llm 走 ctx.get 惰性读取，缺失时降级为清晰报错，
 // 而不是让整个插件卡在 PENDING。
@@ -133,6 +141,9 @@ export function apply(ctx, config = {}) {
           wsConnected: Boolean(runtime.client && runtime.client.ready),
         },
         settingsFile,
+        backendVersion: BACKEND_VERSION,
+        // 前端据此判断后端是否支持「信息过滤」等新能力，缺字段时自动降级提示。
+        capabilities: ['settings', 'groups', 'friends', 'members', 'recent', 'flush', 'reload'],
       })
       return
     }
@@ -146,7 +157,11 @@ export function apply(ctx, config = {}) {
 
         const current = readSettings(settingsFile)
         // 合并而非替换：只提交改动字段的客户端也能工作。
-        const merged = deepMerge(current, sanitizeOverride(incoming).override)
+        const sanitized = sanitizeOverride(incoming)
+        const merged = deepMerge(current, sanitized.override)
+        // dropped 非空说明前端提交了本后端不认识（或类型不对）的字段：
+        // 典型场景是后端还是旧代码，白名单里没有新增项。必须显式告诉前端，否则就是「显示已保存其实丢了」。
+        const droppedFields = sanitized.dropped || []
 
         // 提交上来的 token 若是脱敏值（含 *）说明用户没改，沿用旧值。
         if (
@@ -176,6 +191,11 @@ export function apply(ctx, config = {}) {
           restarts: runtime.restarts,
           configErrors: runtime.errors,
           status: runtime.status(),
+          backendVersion: BACKEND_VERSION,
+          droppedFields,
+          ...(droppedFields.length > 0
+            ? { warning: '以下字段未生效（后端不识别）：' + droppedFields.join('、') }
+            : {}),
         })
       } catch (error) {
         sendJson(res, 500, { ok: false, error: error && error.message ? error.message : String(error) })
@@ -316,6 +336,33 @@ export function apply(ctx, config = {}) {
           groupName: String(g.group_name || ''),
           memberCount: g.member_count != null ? Number(g.member_count) : null,
           maxMemberCount: g.max_member_count != null ? Number(g.max_member_count) : null,
+        })),
+        error,
+      })
+      return
+    }
+
+    if (pathname === '/api/qq-digest/members' && req.method === 'GET') {
+      const groupId = new URL(req.url, 'http://x').searchParams.get('groupId') || ''
+      let available = []
+      let error = ''
+      if (!groupId) {
+        error = '缺少 groupId 参数'
+      } else {
+        try {
+          if (runtime.actions) available = await runtime.actions.groupMemberList(groupId)
+        } catch (e) {
+          error = e && e.message ? e.message : String(e)
+        }
+      }
+      sendJson(res, 200, {
+        ok: !error,
+        groupId,
+        available: (available || []).map((m) => ({
+          userId: String(m.user_id),
+          nickname: String(m.nickname || m.card || ''),
+          card: String(m.card || ''),
+          role: String(m.role || ''),
         })),
         error,
       })

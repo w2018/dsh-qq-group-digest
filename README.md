@@ -6,7 +6,7 @@
 
 DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维度报告
 
-[![version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](#版本信息)
+[![version](https://img.shields.io/badge/version-v0.2.0-blue.svg)](#版本信息)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](#许可)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 [![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.2-7c5cff.svg)](https://github.com/deepseek-ai)
@@ -32,7 +32,9 @@ DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维�
 
 | 项 | 值 |
 | :--- | :--- |
-| 当前版本 | **v0.1.0** |
+| 当前版本 | **v0.2.0** |
+| 发布日期 | 2026-10-25 |
+| 最新发布 | [v0.2.0 · 信息过滤](https://github.com/w2018/dsh-qq-group-digest/releases/tag/v0.2.0) |
 
 ---
 
@@ -112,6 +114,9 @@ pnpm install
 | 🧠 **总结与降级** | 路由三级回退（显式配置 → DSH 默认 → 首个可用），失败指数退避重试；重试耗尽降级为原始摘录，**仍然投递** |
 | 📤 **报告投递** | 多群按群名 / 群号编号成一份报告，超长按行分段，段间间隔防风控；全部失败兜底写 `outbox/failed-*.md` |
 | 🧵 **历史上下文** | 每群 `summaries/<群号>.json` 存最近 20 条，每次总结附带此前 `historyCount` 条，避免重复叙述、丢关键结论 |
+| 🚫 **信息过滤** | 关键词模糊匹配（不区分大小写）与按群排除成员，命中的消息不计入总结，丢弃原因计入 `dropReasons` |
+| 🎛 **设置界面** | 浏览器内改全部配置，保存即热生效；群进度 `[n/threshold]` 实时可见，状态与报告 5 秒自动刷新 |
+| 🧭 **侧边栏入口** | 可开关：开启后 DSH 主界面左侧导航多一行「QQ 群总结」 |
 | 🔄 **热重载** | 改 `lib/**` 后点「热重载插件」即可生效，未总结的消息不会丢 |
 
 ---
@@ -138,7 +143,7 @@ dsh-qq-group-digest/
 ├── client.js             # Client 半身：设置页面板 + 侧边栏入口
 ├── lib/                  # 连接 / 接入 / 分批 / 总结 / 投递 / 存储
 ├── doc/                  # 版本变更记录
-└── test/                 # 85 个用例，node:test，零依赖
+└── test/                 # 90 个用例，node:test，零依赖
 ```
 
 </details>
