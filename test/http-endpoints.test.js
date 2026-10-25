@@ -354,3 +354,33 @@ test('未知路由返回 404', async () => {
   assert.equal(r.status, 404)
   assert.equal(r.body.ok, false)
 })
+
+test('通用 POST /settings 改 httpServer 段会真正重启监听（不再只有 /http 专用端点生效）', async () => {
+  // 先找一个空闲端口：listen(0) 拿到就关，紧接着给插件用。
+  const probe = net.createServer()
+  await new Promise((resolve) => probe.listen(0, '0.0.0.0', resolve))
+  const freePort = probe.address().port
+  await new Promise((resolve) => probe.close(resolve))
+
+  const r = await call('POST', '/api/qq-digest/settings', {
+    httpServer: { enabled: true, port: freePort, host: '127.0.0.1', authEnabled: false },
+  })
+  assert.equal(r.status, 200)
+  assert.equal(r.body.ok, true)
+  assert.deepEqual(r.body.droppedFields, [], 'httpServer 字段必须在白名单内，不能被静默丢弃')
+
+  // 监听是 setImmediate 异步起的，等一轮再断言。
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  const live = await call('GET', '/api/qq-digest/http')
+  assert.equal(live.body.enabled, true)
+  assert.equal(live.body.port, freePort)
+  assert.equal(live.body.listening, true, '保存后必须真的在监听')
+  assert.equal(live.body.error, '')
+
+  // 关掉，避免占着端口影响后续用例与进程退出。
+  const off = await call('POST', '/api/qq-digest/settings', { httpServer: { enabled: false } })
+  assert.equal(off.status, 200)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  const stopped = await call('GET', '/api/qq-digest/http')
+  assert.equal(stopped.body.listening, false, '关闭开关后必须停止监听')
+})

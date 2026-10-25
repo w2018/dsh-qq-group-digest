@@ -304,6 +304,15 @@ export function apply(ctx, config = {}) {
     logger?.warn?.('[qq-digest] ' + runtime.startError + '（status 与设置页仍可访问，请在设置页补全配置）')
   }
 
+  // httpServer 段是否发生变化（端口 / 监听地址 / 开关 / 鉴权 / 有效期任一不同）。
+  // 只有变了才重启监听，避免每次保存其它字段都白白断开一次连接。
+  const httpSectionChanged = (a, b) => {
+    const keys = ['enabled', 'port', 'host', 'authEnabled', 'sessionHours', 'token']
+    const left = a && typeof a === 'object' ? a : {}
+    const right = b && typeof b === 'object' ? b : {}
+    return keys.some((k) => String(left[k] == null ? '' : left[k]) !== String(right[k] == null ? '' : right[k]))
+  }
+
   // ── HTTP 路由 ──────────────────────────────────────────────────
   const handler = async (req, res) => {
     let pathname = '/'
@@ -363,6 +372,7 @@ export function apply(ctx, config = {}) {
         const incoming = body && body.settings ? body.settings : body
 
         const current = readSettings(settingsFile)
+        const beforeHttp = Object.assign({}, (runtime.cfg && runtime.cfg.httpServer) || {})
         // 合并而非替换：只提交改动字段的客户端也能工作。
         const sanitized = sanitizeOverride(incoming)
         const merged = deepMerge(current, sanitized.override)
@@ -392,6 +402,9 @@ export function apply(ctx, config = {}) {
 
         // 校验通过才落盘：先试跑再持久化，避免把错误配置写进文件。
         writeSettings(settingsFile, merged)
+        // httpServer 段变了必须重启监听：只 reconfigure 不会重新 listen，
+        // 否则「勾了开启、显示已保存」但端口一直没人听（只有 /http 专用端点会重启）。
+        if (httpSectionChanged(beforeHttp, merged.httpServer)) restartHttp()
         sendJson(res, 200, {
           ok: true,
           reloaded: true,
@@ -413,7 +426,10 @@ export function apply(ctx, config = {}) {
     if (pathname === '/api/qq-digest/settings/reset' && req.method === 'POST') {
       try {
         writeSettings(settingsFile, {})
+        const beforeHttp = Object.assign({}, (runtime.cfg && runtime.cfg.httpServer) || {})
         const result = runtime.reconfigure(deepMerge(baseConfig, {}))
+        // 恢复初始配置会把 httpServer.enabled 打回 false，监听必须同步停掉。
+        if (httpSectionChanged(beforeHttp, (runtime.cfg && runtime.cfg.httpServer) || {})) restartHttp()
         sendJson(res, 200, { ok: true, reloaded: result.ok, configErrors: runtime.errors })
       } catch (error) {
         sendJson(res, 500, { ok: false, error: error && error.message ? error.message : String(error) })
