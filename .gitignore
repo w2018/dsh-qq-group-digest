@@ -6,6 +6,7 @@ node_modules/
 generations/
 outbox/
 summaries/
+logs/
 *.log
 
 # 临时目录（见 doc/版本变更记录.md 约束：测试脚本/临时文件只放 tmp/，禁止进 git）

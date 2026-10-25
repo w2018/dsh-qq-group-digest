@@ -18,11 +18,11 @@ function withTemp(fn) {
 test('append 补 at 与自增 seq，并归一化字段', () => {
   withTemp((dir) => {
     const store = new LogStore(dir)
-    const a = store.append({ level: 'INFO', scope: ' pipeline ', groupId: 908370050, msg: '冻结批次' })
+    const a = store.append({ level: 'INFO', scope: ' pipeline ', groupId: 123456789, msg: '冻结批次' })
     const b = store.append({ level: 'warn', msg: '第二条' })
     assert.equal(a.level, 'info')
     assert.equal(a.scope, 'pipeline')
-    assert.equal(a.groupId, '908370050')
+    assert.equal(a.groupId, '123456789')
     assert.equal(a.seq, 1)
     assert.equal(b.seq, 2)
     assert.ok(a.at > 0)

@@ -96,7 +96,7 @@ prompt:
 **数据结构**：新增 `lib/store/logs.js` 环形缓冲 + 落盘。
 
 ```json
-{ "at": 1730000000000, "level": "info", "scope": "pipeline", "groupId": "908370050", "msg": "冻结批次 b12，31 条", "extra": { "batchId": "b12-908370050", "reason": "threshold" } }
+{ "at": 1730000000000, "level": "info", "scope": "pipeline", "groupId": "123456789", "msg": "冻结批次 b12，31 条", "extra": { "batchId": "b12-123456789", "reason": "threshold" } }
 ```
 
 - 内存保留最近 2000 条，落盘 `logs/YYYY-MM-DD.jsonl`（保留 7 天，跟随 `storage.keepDays`）。
@@ -110,7 +110,7 @@ prompt:
 
 ```json
 {
-  "batchId": "b12-908370050", "groupId": "...", "groupName": "...",
+  "batchId": "b12-123456789", "groupId": "...", "groupName": "...",
   "at": 1730000000000, "count": 31, "firstSec": ..., "lastSec": ...,
   "ok": true, "model": "workbuddy/deepseek-v4.1-flash", "attempts": 1,
   "participants": [{ "id": "...", "name": "王五", "count": 7 }],
@@ -130,7 +130,7 @@ prompt:
 - 新增 `lib/summarize/markdown.js`：`renderDetailedMarkdown(entry, records)`。
 - MD 示例结构：
   ```markdown
-  # 908370050 · AI技术交流分享[北辰]
+  # 123456789 · AI技术交流分享[北辰]
   > 2026-10-25 11:20–12:05 · 31 条消息 · 12 位发言人 · workbuddy/deepseek-v4.1-flash
 
   ## 一、本批主线
