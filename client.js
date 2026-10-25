@@ -834,6 +834,12 @@ window.__ModuleLoader__.load({
         }
       }, [flash])
 
+      // F-3 的每秒 tick 是 hook，**必须**在任何提前 return 之前调用。
+      // 之前它写在 `if (loading || !form) return` 之后，首帧（loading=true）不调用、
+      // 加载完成后才调用，触发 React「Rendered more hooks than during the previous
+      // render」→ 整个设置面板渲染抛错变空白。
+      const linkNow = useLinkTick(Boolean(status && status.ws && status.ws.reconnecting))
+
       if (loading || !form) {
         return h('div', { className: 'qqd-root' },
           h('div', { className: 'qqd-head' },
@@ -845,8 +851,7 @@ window.__ModuleLoader__.load({
 
       const wsOk = Boolean(status && status.wsConnected)
       const errs = (status && status.configErrors) || []
-      // F-3：连接态徽章与每秒递减的重连倒计时。
-      const linkNow = useLinkTick(Boolean(status && status.ws && status.ws.reconnecting))
+      // F-3：连接态徽章与每秒递减的重连倒计时（linkNow 在上面的 hook 区已算好）。
       const linkBadge = linkBadgeOf(status && status.ws, linkNow)
       // E-4：投递目标为空时给一行提示，不报错、不阻塞保存。
       const friendsConfigured = Array.isArray(form.delivery && form.delivery.friends)
