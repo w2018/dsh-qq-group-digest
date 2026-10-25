@@ -6,12 +6,12 @@
 
 DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维度报告
 
-[![version](https://img.shields.io/badge/version-v0.5.0-blue.svg)](#版本信息)
+[![version](https://img.shields.io/badge/version-v0.5.1-blue.svg)](#版本信息)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](#许可)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 [![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.2-7c5cff.svg)](https://github.com/deepseek-ai)
-[![releases](https://img.shields.io/badge/releases-v0.5.0-lightgrey.svg)](https://github.com/w2018/dsh-qq-group-digest/releases)
-[![tests](https://img.shields.io/badge/tests-308%20passing-brightgreen.svg)](#主要功能)
+[![releases](https://img.shields.io/badge/releases-v0.5.1-lightgrey.svg)](https://github.com/w2018/dsh-qq-group-digest/releases)
+[![tests](https://img.shields.io/badge/tests-326%20passing-brightgreen.svg)](#主要功能)
 
 [核心配套](#-核心配套luckylilliabot) · [版本信息](#版本信息) · [依赖](#依赖) · [安装使用](#安装使用) · [HTTP 网页服务](#-http-网页服务) · [主要功能](#主要功能) · [数据与目录](#数据与目录)
 
@@ -33,9 +33,9 @@ DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维�
 
 | 项 | 值 |
 | :--- | :--- |
-| 当前版本 | **v0.5.0** |
+| 当前版本 | **v0.5.1** |
 | 发布日期 | 2026-10-25 |
-| 最新发布 | [v0.5.0 · 总结质量与连接健壮性](https://github.com/w2018/dsh-qq-group-digest/releases/tag/v0.5.0) |
+| 最新发布 | [v0.5.1 · 总结记录双视图与精细版提示词优化](https://github.com/w2018/dsh-qq-group-digest/releases/tag/v0.5.1) |
 
 ---
 

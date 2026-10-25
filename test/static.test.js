@@ -291,6 +291,58 @@ test('summaries.html 用 md.js 渲染，并对链接加 rel=noopener', () => {
   assert.match(html, /noopener noreferrer/)
 })
 
+// ── 总结记录页：普通总结 / AI 精细版 内容视图切换 ─────────────
+
+test('summaries.html 有「普通总结 / AI 精细版」两个 tab，默认选中普通总结', () => {
+  const html = read('summaries.html')
+  assert.match(html, /id="sum-tabs"/)
+  assert.match(html, /id="tab-normal"[\s\S]{0,220}data-active="true"/)
+  assert.match(html, /id="tab-detail"[\s\S]{0,220}data-active="false"/)
+  assert.match(html, /kind: 'normal'/, 'state.kind 默认必须是 normal')
+  // 复用现有的 .qd-tabs / .qd-tab 样式类，不新造一套 tab 组件
+  assert.match(html, /class="qd-tabs"/)
+  assert.match(html, /class="qd-tab"/)
+})
+
+test('summaries.html 切换 tab 只改视图状态，不跳转、不重新拉列表', () => {
+  const html = read('summaries.html')
+  assert.match(html, /function syncTabs/)
+  assert.match(html, /function switchKind/)
+  assert.match(html, /dataset\.active = on \? 'true' : 'false'/)
+  assert.match(html, /setAttribute\('aria-selected'/)
+  const body = html.slice(html.indexOf('function switchKind'))
+  const seg = body.slice(0, body.indexOf(";['#tab-normal'"))
+  assert.doesNotMatch(seg, /location\.(href|replace)/, '切换 tab 不能改路由')
+  assert.doesNotMatch(seg, /loadList\(/, '切换 tab 不能重新请求列表')
+})
+
+test('summaries.html 两种内容取自同一条记录的不同字段，而不是两次请求', () => {
+  const html = read('summaries.html')
+  assert.match(html, /var detailMd = String\(item\.md \|\| ''\)/)
+  assert.match(html, /var plainText = String\(item\.text \|\| ''\)/)
+  assert.match(html, /function renderCurrent/)
+  // 切换后只重渲染详情区
+  assert.match(html, /if \(state\.currentDetail\) renderCurrent\(\)/)
+})
+
+test('summaries.html 某一项为空时只影响自己，给出占位并提示切到另一视图', () => {
+  const html = read('summaries.html')
+  assert.match(html, /只有普通总结正文/)
+  assert.match(html, /没有单独保存普通总结正文/)
+  assert.match(html, /这条记录的 AI 精细版正文为空/)
+})
+
+test('summaries.html 参与成员表只在 AI 精细版视图追加', () => {
+  const html = read('summaries.html')
+  assert.match(html, /if \(state\.kind === 'detail'\) renderParticipants\(view, item\.participants\)/)
+})
+
+test('summaries.html 的 tab 在窄屏下均分整行（响应式）', () => {
+  const css = read('app.css')
+  assert.match(css, /\.qd-sumtabs/)
+  assert.match(css, /@media \(max-width: 900px\)[\s\S]{0,200}\.qd-sumtabs \.qd-tab \{ flex: 1 1 0/)
+})
+
 // ── 服务端静态路由约定 ─────────────────────────────────────────
 
 test('server.js 的静态路由与本目录的文件一一对应', () => {

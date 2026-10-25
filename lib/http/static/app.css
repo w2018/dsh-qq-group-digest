@@ -1474,6 +1474,23 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
 }
 
+/* 总结记录页的视图切换条：复用 .qd-tabs/.qd-tab，只补容器留白与分隔线。 */
+.qd-sumtabs {
+  display: flex;
+  align-items: center;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--qd-border);
+  background: var(--qd-bg-elev);
+}
+
+.qd-sumtabs .qd-tabs { margin-bottom: 0; }
+
+/* 窄屏下两个 tab 均分整行，避免文字挤在一起。 */
+@media (max-width: 900px) {
+  .qd-sumtabs .qd-tabs { width: 100%; }
+  .qd-sumtabs .qd-tab { flex: 1 1 0; text-align: center; }
+}
+
 /* 未配置投递目标时的提示行：用警告色，但只是提示，不是错误。 */
 .qd-hint.warn { color: var(--qd-warn); }
 
