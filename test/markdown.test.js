@@ -56,9 +56,19 @@ test('participants 为空时成员表渲染「（未记录）」', () => {
   assert.match(legacy, /\| （未记录） \|/)
 })
 
-test('群名为空时标题退回群号', () => {
+test('群名为空时标题只显示一次群号（不重复）', () => {
   const md = renderDetailedMarkdown(baseEntry({ groupName: '' }))
-  assert.match(md, /^# 100000001 · 100000001/)
+  assert.match(md, /^# 100000001\n/)
+})
+
+test('群名与群号相同（协议端没给群名）时标题也不重复', () => {
+  const md = renderDetailedMarkdown(baseEntry({ groupName: '100000001' }))
+  assert.match(md, /^# 100000001\n/)
+})
+
+test('群名正常时标题是「群号 · 群名」', () => {
+  const md = renderDetailedMarkdown(baseEntry({ groupName: '测试群' }))
+  assert.match(md, /^# 100000001 · 测试群\n/)
 })
 
 test('ok=false 时状态行标注总结失败（降级为原始摘录）', () => {

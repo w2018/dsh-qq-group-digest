@@ -11,7 +11,7 @@ DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维�
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 [![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.2-7c5cff.svg)](https://github.com/deepseek-ai)
 [![releases](https://img.shields.io/badge/releases-v0.3.0-lightgrey.svg)](https://github.com/w2018/dsh-qq-group-digest/releases)
-[![tests](https://img.shields.io/badge/tests-213%20passing-brightgreen.svg)](#开发)
+[![tests](https://img.shields.io/badge/tests-215%20passing-brightgreen.svg)](#开发)
 
 [核心配套](#-核心配套luckylilliabot) · [版本信息](#版本信息) · [依赖](#依赖) · [安装使用](#安装使用) · [HTTP 网页服务](#-http-网页服务) · [主要功能](#主要功能) · [数据与目录](#数据与目录)
 
@@ -192,7 +192,7 @@ dsh-qq-group-digest/
 │   ├── http/             # 独立网页服务：server / auth / api + static 四页
 │   └── summarize/        # 提示词、Markdown 渲染、总结调用
 ├── doc/                  # 版本变更记录 + 开发计划
-└── test/                 # 213 个用例，node:test，零依赖
+└── test/                 # 215 个用例，node:test，零依赖
 ```
 
 </details>
