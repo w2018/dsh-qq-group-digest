@@ -151,3 +151,57 @@ test('flushAll 立即冻结并处理 pending', async () => {
   assert.equal(llm.calls.length, 1)
   pipeline.dispose()
 })
+
+test('deliverEntries 多群各发一条独立消息，不合并且每群回填自己的投递结果', async () => {
+  const actions = fakeActions(0)
+  const llm = fakeLlm([{ text: '群一总结内容足够长的一段文字。' }, { text: '群二总结内容足够长的一段文字。' }])
+  const { pipeline } = buildPipeline(
+    { listen: { groups: ['100000001', '222333444'] }, batch: { threshold: 2, freezeGraceMs: 0 }, dryRun: false },
+    llm,
+    actions,
+  )
+  const collected = []
+  pipeline.onGroupSummary = async (e) => collected.push(e)
+  pipeline.handleEvent(makeEvent({ groupId: '100000001', msgId: '1', realSeq: 1 }))
+  pipeline.handleEvent(makeEvent({ groupId: '222333444', msgId: '2', realSeq: 2 }))
+  pipeline.handleEvent(makeEvent({ groupId: '100000001', msgId: '3', realSeq: 3 }))
+  pipeline.handleEvent(makeEvent({ groupId: '222333444', msgId: '4', realSeq: 4 }))
+  await new Promise((r) => setTimeout(r, 150))
+
+  const out = await pipeline.deliverEntries(collected, 1792825000)
+  assert.equal(out.entries.length, 2)
+  // 两个群 → 两个好友段？好友只有一个 → 两条消息，每条只含本群内容。
+  assert.equal(actions.sent.length, 2)
+  const bodies = actions.sent.map((s) => String(s.text || ''))
+  assert.ok(bodies.some((b) => b.includes('100000001') && !b.includes('222333444')))
+  assert.ok(bodies.some((b) => b.includes('222333444') && !b.includes('100000001')))
+  assert.equal(out.perGroup.length, 2)
+  assert.ok(out.perGroup.every((x) => x.ok === true))
+  pipeline.dispose()
+})
+
+test('deliverEntries 单群失败只影响该群的历史回填', async () => {
+  const actions = fakeActions(0)
+  let n = 0
+  const original = actions.sendPrivate
+  actions.sendPrivate = async (userId, seg) => {
+    n += 1
+    if (n === 1) throw new Error('第一个群被风控')
+    return original(userId, seg)
+  }
+  const { pipeline } = buildPipeline(
+    { batch: { threshold: 1, freezeGraceMs: 0 }, dryRun: false, delivery: { friends: ['100000002'], retry: { attempts: 1, backoffMs: 1 } } },
+    fakeLlm(),
+    actions,
+  )
+  const list = [
+    { groupId: '111', batchId: 'b1', groupName: '群一', ok: true, text: '群一正文', count: 1 },
+    { groupId: '222', batchId: 'b2', groupName: '群二', ok: true, text: '群二正文', count: 1 },
+  ]
+  const out = await pipeline.deliverEntries(list, 1792825000)
+  assert.equal(out.result.failed.length, 1)
+  assert.match(out.result.failed[0].error, /111/)
+  const per = out.perGroup.find((x) => x.groupId === '222')
+  assert.equal(per.ok, true)
+  pipeline.dispose()
+})

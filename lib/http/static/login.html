@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · QQ 群总结</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="qd-login-wrap">
+  <form class="qd-login" id="login-form" autocomplete="off">
+    <div class="qd-login-logo">QQ</div>
+    <h1>QQ 群总结</h1>
+    <p class="qd-page-sub">请输入访问密钥。密钥在插件设置页的「HTTP 服务」里可以查看与重新生成。</p>
+
+    <label class="qd-field">
+      <span class="qd-label">访问密钥</span>
+      <input class="qd-input" id="token" type="password" placeholder="粘贴或输入密钥" autocomplete="current-password" spellcheck="false" autofocus>
+    </label>
+
+    <button class="qd-btn primary" id="submit" type="submit">登录</button>
+    <div class="qd-login-msg" id="msg" role="status" aria-live="polite"></div>
+
+    <div class="qd-login-foot">
+      连续失败 5 次会锁定 60 秒。<br>
+      忘记密钥？在 DSH 设置页里重新生成一个即可，旧密钥会立刻失效。
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  'use strict'
+
+  var form = document.getElementById('login-form')
+  var input = document.getElementById('token')
+  var button = document.getElementById('submit')
+  var msg = document.getElementById('msg')
+  var lockedUntil = 0
+  var lockTimer = null
+
+  /** 显示一行提示；kind 为 ok 时用绿色。 */
+  function say(text, kind) {
+    msg.textContent = text || ''
+    msg.className = 'qd-login-msg' + (kind === 'ok' ? ' ok' : '')
+  }
+
+  /** 进入锁定倒计时：按钮禁用，每秒刷新剩余秒数。 */
+  function lock(seconds) {
+    var left = Math.max(1, Math.trunc(Number(seconds) || 60))
+    lockedUntil = Date.now() + left * 1000
+    if (lockTimer) clearInterval(lockTimer)
+    var tick = function () {
+      var remain = Math.ceil((lockedUntil - Date.now()) / 1000)
+      if (remain <= 0) {
+        clearInterval(lockTimer)
+        lockTimer = null
+        button.disabled = false
+        say('可以重试了。')
+        return
+      }
+      button.disabled = true
+      say('已锁定，请 ' + remain + ' 秒后重试')
+    }
+    tick()
+    lockTimer = setInterval(tick, 1000)
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    if (button.disabled) return
+    var token = String(input.value || '').trim()
+    if (!token) {
+      say('请先输入访问密钥')
+      input.focus()
+      return
+    }
+
+    button.disabled = true
+    say('正在校验…')
+    try {
+      var res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: token }),
+      })
+      var data = await res.json().catch(function () { return {} })
+
+      if (res.ok && data.ok) {
+        say('登录成功，正在跳转…', 'ok')
+        location.replace('/')
+        return
+      }
+
+      if (res.status === 429) {
+        lock(data.retryAfterSec || 60)
+        return
+      }
+
+      button.disabled = false
+      say(data.error || '密钥不正确')
+      input.select()
+    } catch (error) {
+      button.disabled = false
+      say('网络异常：' + (error && error.message ? error.message : String(error)))
+    }
+  }
+
+  form.addEventListener('submit', submit)
+
+  // 已经登录过就直接进配置页，省一次输入。
+  fetch('/api/status', { headers: { accept: 'application/json' } })
+    .then(function (res) {
+      if (res.ok) location.replace('/')
+    })
+    .catch(function () { /* 未登录或服务未起，留在登录页 */ })
+})()
+</script>
+</body>
+</html>

@@ -1,0 +1,1414 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>配置 · QQ 群总结</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div class="qd-topbar">
+  <div class="qd-brand"><span class="qd-logo">QQ</span><span>QQ 群总结</span></div>
+  <nav class="qd-nav">
+    <a href="/" class="active">配置</a>
+    <a href="/logs">日志</a>
+    <a href="/summaries">总结记录</a>
+  </nav>
+  <div class="qd-topbar-right">
+    <button class="qd-btn ghost sm" id="btn-logout" type="button">退出登录</button>
+  </div>
+</div>
+
+<main class="qd-main">
+  <div class="qd-page-head">
+    <h1 class="qd-page-title">配置</h1>
+    <p class="qd-page-sub" id="head-sub">正在加载配置…</p>
+  </div>
+
+  <section class="qd-card open" data-card="status">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">运行状态</h2>
+      <span class="qd-card-sum" data-sum></span>
+      <span class="qd-badge" id="status-badge">加载中</span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-kv" id="status-kv"></div>
+      <div class="qd-row">
+        <div class="qd-label">每群进度</div>
+        <div class="qd-control">
+          <div class="qd-progress-list" id="status-groups"></div>
+          <div class="qd-hint">进度 = 当前累积条数 / 该群触发阈值。到阈值后自动冻结并生成总结。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">最近错误</div>
+        <div class="qd-control"><div class="qd-hint" id="status-errors">无</div></div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">最近一次报告</div>
+        <div class="qd-control"><div class="qd-hint" id="status-report">还没有投递过报告。</div></div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">即时操作</div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <button class="qd-btn ghost sm" type="button" id="btn-flush">立即总结当前批次</button>
+            <button class="qd-btn ghost sm" type="button" id="btn-refresh">刷新状态</button>
+          </div>
+          <div class="qd-hint">「立即总结」把各群已累积的消息提前冻结并投递，不等阈值。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">数据源连接 <code>napcat</code></div>
+        <div class="qd-control">
+          <input class="qd-input" data-path="napcat.wsUrl" placeholder="ws://127.0.0.1:3001">
+          <div class="qd-hint">NapCat 的 OneBot 11 正向 WebSocket 地址，改完保存会重连。</div>
+          <input class="qd-input" data-path="napcat.token" placeholder="访问令牌（可留空）" style="margin-top:6px">
+          <div class="qd-hint">显示为 **** 表示已有令牌；不改就保持原值。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="http">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">HTTP 服务</h2>
+      <span class="qd-card-sum" data-sum></span>
+      <span class="qd-badge" id="http-badge">未知</span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">启用网页服务</div>
+        <div class="qd-control">
+          <label class="qd-switch">
+            <input type="checkbox" data-path="httpServer.enabled">
+            <span class="qd-switch-track"></span>
+            <span>开启后可用浏览器访问配置页 / 日志页 / 总结记录页</span>
+          </label>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">监听端口 <code>httpServer.port</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="1024" max="65535" data-path="httpServer.port">
+          <div class="qd-hint">默认 1213，可填 1024–65535。改端口后需要用新端口重新打开页面。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">监听地址 <code>httpServer.host</code></div>
+        <div class="qd-control">
+          <input class="qd-input" data-path="httpServer.host" placeholder="0.0.0.0">
+          <div class="qd-hint">0.0.0.0 = 允许局域网访问；127.0.0.1 = 只允许本机。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">访问鉴权</div>
+        <div class="qd-control">
+          <label class="qd-switch">
+            <input type="checkbox" data-path="httpServer.authEnabled">
+            <span class="qd-switch-track"></span>
+            <span>要求输入访问密钥才能打开页面</span>
+          </label>
+          <div class="qd-hint">关闭后同一网络内任何人都能打开这三个页面，请只在可信环境里关闭。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">登录有效期 <code>httpServer.sessionHours</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="1" max="8760" data-path="httpServer.sessionHours">
+          <div class="qd-hint">单位小时，默认 168（7 天）。过期需要重新输入密钥。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">访问密钥</div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <code class="qd-badge" id="token-masked">—</code>
+            <button class="qd-btn ghost sm" type="button" id="btn-token">重新生成密钥</button>
+          </div>
+          <div class="qd-hint">密钥只在生成的那一刻完整显示一次。重新生成会让所有已登录的浏览器立刻掉线。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="listen">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">监听目标</h2>
+      <span class="qd-card-sum" data-sum></span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">要监听的群 <code>listen.groups</code></div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <input class="qd-input" id="group-input" list="group-options" placeholder="输入群号后回车，或从下方已加入的群选择">
+            <button class="qd-btn ghost sm" type="button" id="group-add">添加</button>
+          </div>
+          <datalist id="group-options"></datalist>
+          <div class="qd-chips" id="group-chips"></div>
+          <div class="qd-hint" id="group-hint">至少配置一个群号，否则插件不会启动管线。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">忽略自己发的消息</div>
+        <div class="qd-control">
+          <label class="qd-switch">
+            <input type="checkbox" data-path="listen.ignoreSelf">
+            <span class="qd-switch-track"></span>
+            <span>不把机器人自己发的消息计入总结</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="filter">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">信息过滤</h2>
+      <span class="qd-card-sum" data-sum></span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">关键词过滤 <code>listen.keywords</code></div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <input class="qd-input" id="keyword-input" placeholder="输入关键词后回车，命中的消息不计入总结">
+            <button class="qd-btn ghost sm" type="button" id="keyword-add">添加</button>
+          </div>
+          <div class="qd-chips" id="keyword-chips"></div>
+          <div class="qd-hint">模糊匹配（不区分大小写），空列表表示不过滤。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">按成员排除 <code>listen.excludedSenders</code></div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <select class="qd-select" id="exclude-group" style="max-width:220px"></select>
+            <input class="qd-input" id="member-search" placeholder="搜索成员昵称或 QQ 号">
+          </div>
+          <div class="qd-chips" id="excluded-chips"></div>
+          <div class="qd-member-box" id="member-box"></div>
+          <div class="qd-hint">先选群，再从该群成员里挑要排除的人（他们的发言不计入总结）。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="batch">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">批次触发</h2>
+      <span class="qd-card-sum" data-sum></span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">触发阈值 <code>batch.threshold</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="1" max="100000" data-path="batch.threshold">
+          <div class="qd-hint">单群累积到多少条消息就冻结成一批去总结，默认 100。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">冻结宽限期 <code>batch.freezeGraceMs</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="0" max="60000" step="100" data-path="batch.freezeGraceMs">
+          <div class="qd-hint">毫秒。到阈值后再等这么久，把陆续到达的消息一起收进同一批。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">缓冲上限 <code>batch.maxBuffer</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="1" max="100000" data-path="batch.maxBuffer">
+          <div class="qd-hint">单群内存里最多缓存多少条，超出后丢最旧的。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">最长等待 <code>batch.maxWaitMs</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="1000" max="86400000" step="1000" data-path="batch.maxWaitMs">
+          <div class="qd-hint">毫秒。冷清群攒不到阈值时，最多等这么久也强制总结一批。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="model">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">总结模型</h2>
+      <span class="qd-card-sum" data-sum></span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">提供商 / 模型</div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <select class="qd-select" id="provider-select" style="max-width:240px"></select>
+            <select class="qd-select" id="model-select" style="max-width:280px"></select>
+          </div>
+          <div class="qd-hint" id="model-hint">留空表示使用 DSH 当前配置的默认模型。列表来自 DSH 的 LLM 服务。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">温度 <code>model.temperature</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="0" max="2" step="0.1" data-path="model.temperature">
+          <div class="qd-hint">0–2，越小越稳定，总结场景建议 0.2–0.4。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">最大输出 <code>model.maxTokens</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="64" max="32000" data-path="model.maxTokens">
+          <div class="qd-hint">单次总结最多生成多少 token，默认 1200。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">请求超时 <code>model.timeoutMs</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="5000" max="600000" step="1000" data-path="model.timeoutMs">
+          <div class="qd-hint">毫秒。超时会按重试次数重来。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">失败重试 <code>model.retries</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="0" max="10" data-path="model.retries">
+          <div class="qd-hint">0–10 次。重试全部失败时降级为原始摘录并继续投递。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">历史总结条数 <code>model.historyCount</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="0" max="10" data-path="model.historyCount">
+          <div class="qd-hint">0–10。把该群最近 N 次总结作为上下文喂给模型，避免重复叙述。0 = 不带历史。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">历史字符上限 <code>model.maxHistoryChars</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="0" max="20000" step="100" data-path="model.maxHistoryChars">
+          <div class="qd-hint">0–20000。历史总结拼进提示词时最多占多少字符。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="prompt">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">AI 提示词</h2>
+      <span class="qd-card-sum" data-sum></span>
+      <span class="qd-badge" id="prompt-badge">默认</span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">系统提示词 <code>prompt.system</code></div>
+        <div class="qd-control">
+          <textarea class="qd-textarea mono" id="prompt-text" spellcheck="false" placeholder="留空 = 使用内置默认提示词"></textarea>
+          <div class="qd-inline">
+            <span class="qd-hint" id="prompt-count">0 / 20000</span>
+            <span class="qd-hint" id="prompt-state"></span>
+            <span style="flex:1"></span>
+            <button class="qd-btn ghost sm" type="button" id="btn-prompt-view">查看默认</button>
+            <button class="qd-btn ghost sm" type="button" id="btn-prompt-reset">恢复默认</button>
+            <button class="qd-btn primary sm" type="button" id="btn-prompt-save">保存提示词</button>
+          </div>
+          <div class="qd-hint">
+            这里改的是喂给模型的 system prompt，保存后下一批总结立刻生效，不需要重启。
+            提示词独立于下面的「保存并生效」，有单独的保存按钮。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="delivery">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">投递目标</h2>
+      <span class="qd-card-sum" data-sum></span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">接收好友 <code>delivery.friends</code></div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <input class="qd-input" id="friend-input" list="friend-options" placeholder="输入 QQ 号后回车，或从好友列表选择">
+            <button class="qd-btn ghost sm" type="button" id="friend-add">添加</button>
+          </div>
+          <datalist id="friend-options"></datalist>
+          <div class="qd-chips" id="friend-chips"></div>
+          <div class="qd-hint">总结会以私聊形式发给这些好友。dryRun 打开时只写 outbox 不真发。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">单条字数 <code>delivery.maxCharsPerMessage</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="200" max="4000" data-path="delivery.maxCharsPerMessage">
+          <div class="qd-hint">超过就自动拆成多条发送，默认 1800。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">合并窗口 <code>delivery.aggregateWindowMs</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="0" max="600000" step="500" data-path="delivery.aggregateWindowMs">
+          <div class="qd-hint">毫秒。多群同时到阈值时，在这个窗口内合并成一条报告再发。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">通道测试</div>
+        <div class="qd-control">
+          <div class="qd-inline">
+            <input class="qd-input" id="test-text" placeholder="[qq-digest] 测试消息：通道正常。">
+            <button class="qd-btn ghost sm" type="button" id="btn-test">发送测试消息</button>
+          </div>
+          <div class="qd-hint">用当前好友列表发一条私聊，确认 NapCat 通道通畅。dryRun 打开时不会真的发出去。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="qd-card" data-card="storage">
+    <header class="qd-card-head" data-toggle>
+      <span class="qd-caret">▾</span>
+      <h2 class="qd-card-title">存储与预演</h2>
+      <span class="qd-card-sum" data-sum></span>
+    </header>
+    <div class="qd-card-body">
+      <div class="qd-row">
+        <div class="qd-label">日志保留天数 <code>storage.keepDays</code></div>
+        <div class="qd-control">
+          <input class="qd-input num" type="number" min="1" max="365" data-path="storage.keepDays">
+          <div class="qd-hint">按天滚动的日志文件保留多久，1–365 天。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">预演模式 <code>dryRun</code></div>
+        <div class="qd-control">
+          <label class="qd-switch">
+            <input type="checkbox" data-path="dryRun">
+            <span class="qd-switch-track"></span>
+            <span>只生成总结并写入 outbox，不真的发私聊</span>
+          </label>
+          <div class="qd-hint">调试期建议打开；关闭前请确认好友列表填对了。</div>
+        </div>
+      </div>
+      <div class="qd-row">
+        <div class="qd-label">AI 精细版 <code>summary.aiDetail</code></div>
+        <div class="qd-control">
+          <label class="qd-switch">
+            <input type="checkbox" data-path="summary.aiDetail">
+            <span class="qd-switch-track"></span>
+            <span>额外一次 LLM 调用，产出更长的结构化 Markdown 文档</span>
+          </label>
+          <div class="qd-hint">
+            关闭时总结记录页用本地渲染器生成文档，零额外调用；
+            打开后每次总结多一次模型请求，总结记录页可切换到 AI 版。
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="qd-actionbar">
+  <span class="qd-dirty" id="dirty-flag">有未保存的改动</span>
+  <span class="qd-grow"></span>
+  <button class="qd-btn ghost" type="button" id="btn-revert">撤销改动</button>
+  <button class="qd-btn ghost" type="button" id="btn-defaults">恢复初始配置</button>
+  <button class="qd-btn primary" type="button" id="btn-save">保存并生效</button>
+</div>
+
+<div class="qd-toasts" id="toasts"></div>
+
+<div class="qd-modal-mask" id="modal">
+  <div class="qd-modal">
+    <div class="qd-modal-head">
+      <h2 id="modal-title">默认提示词</h2>
+      <button class="qd-btn ghost sm" type="button" id="modal-close">关闭</button>
+    </div>
+    <div class="qd-modal-body"><pre id="modal-body"></pre></div>
+    <div class="qd-modal-foot">
+      <button class="qd-btn ghost" type="button" id="modal-copy">复制</button>
+      <button class="qd-btn primary" type="button" id="modal-ok">知道了</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict'
+
+  var DEFAULTS_FALLBACK = { threshold: 100, freezeGraceMs: 2000, maxBuffer: 500, maxWaitMs: 3600000 }
+
+  var state = {
+    settings: {},
+    original: '',
+    dirty: {},
+    defaults: DEFAULTS_FALLBACK,
+    groups: [],
+    friends: [],
+    members: [],
+    memberGroup: '',
+    models: { providers: [], current: null },
+    prompt: { system: '', isDefault: true, defaultPrompt: '', maxChars: 20000 },
+    promptDirty: false,
+    statusTimer: null,
+  }
+
+  // ── 小工具 ────────────────────────────────────────────────
+
+  function $(sel) { return document.querySelector(sel) }
+  function $all(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)) }
+
+  /** 按点分路径取/写对象。 */
+  function getPath(obj, path) {
+    var parts = path.split('.')
+    var cur = obj
+    for (var i = 0; i < parts.length; i += 1) {
+      if (cur == null || typeof cur !== 'object') return undefined
+      cur = cur[parts[i]]
+    }
+    return cur
+  }
+
+  function setPath(obj, path, value) {
+    var parts = path.split('.')
+    var cur = obj
+    for (var i = 0; i < parts.length - 1; i += 1) {
+      if (cur[parts[i]] == null || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {}
+      cur = cur[parts[i]]
+    }
+    cur[parts[parts.length - 1]] = value
+  }
+
+  /** 统一的 fetch 包装：401 跳登录页，非 2xx 抛错。 */
+  async function api(path, options) {
+    var opts = options || {}
+    if (opts.body !== undefined && typeof opts.body !== 'string') {
+      opts.headers = Object.assign({ 'content-type': 'application/json' }, opts.headers || {})
+      opts.body = JSON.stringify(opts.body)
+    }
+    var res = await fetch(path, opts)
+    if (res.status === 401) {
+      location.replace('/login')
+      throw new Error('未登录')
+    }
+    var data = null
+    try { data = await res.json() } catch (e) { data = null }
+    if (!res.ok || (data && data.ok === false)) {
+      var message = (data && data.error) || ('请求失败（HTTP ' + res.status + '）')
+      throw new Error(message)
+    }
+    return data || {}
+  }
+
+  function toast(text, kind) {
+    var box = $('#toasts')
+    var el = document.createElement('div')
+    el.className = 'qd-toast ' + (kind || '')
+    el.textContent = text
+    box.appendChild(el)
+    setTimeout(function () {
+      el.style.opacity = '0'
+      setTimeout(function () { el.remove() }, 200)
+    }, kind === 'err' ? 5200 : 2600)
+  }
+
+  function fmtTime(ms) {
+    if (!ms) return '—'
+    var d = new Date(Number(ms))
+    if (isNaN(d.getTime())) return '—'
+    function p(n) { return n < 10 ? '0' + n : String(n) }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+      ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+  }
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag)
+    if (cls) node.className = cls
+    if (text != null) node.textContent = text
+    return node
+  }
+
+  // ── 脏标记 / 操作条 ───────────────────────────────────────
+
+  function markDirty(path) {
+    state.dirty[path] = true
+    $('#dirty-flag').classList.add('show')
+  }
+
+  function clearDirty() {
+    state.dirty = {}
+    $('#dirty-flag').classList.remove('show')
+  }
+
+  function dirtyCount() { return Object.keys(state.dirty).length }
+
+  // ── 折叠卡片 ──────────────────────────────────────────────
+
+  $all('[data-toggle]').forEach(function (head) {
+    head.addEventListener('click', function () {
+      head.parentElement.classList.toggle('open')
+    })
+  })
+
+  // ── 表单绑定 ──────────────────────────────────────────────
+
+  /** 把 state.settings 的值刷到所有带 data-path 的控件上。 */
+  function fillFields() {
+    $all('[data-path]').forEach(function (node) {
+      var value = getPath(state.settings, node.getAttribute('data-path'))
+      if (node.type === 'checkbox') {
+        node.checked = value === true
+      } else if (value === undefined || value === null) {
+        node.value = ''
+      } else {
+        node.value = String(value)
+      }
+    })
+  }
+
+  /** 读取控件当前值并写回 state.settings。 */
+  function readField(node) {
+    var path = node.getAttribute('data-path')
+    var value
+    if (node.type === 'checkbox') value = node.checked
+    else if (node.type === 'number') {
+      var n = Number(node.value)
+      value = Number.isFinite(n) ? n : 0
+    } else value = String(node.value)
+    setPath(state.settings, path, value)
+    markDirty(path)
+  }
+
+  $all('[data-path]').forEach(function (node) {
+    var evt = node.type === 'checkbox' || node.tagName === 'SELECT' ? 'change' : 'input'
+    node.addEventListener(evt, function () { readField(node) })
+  })
+
+  // ── 芯片列表（群 / 关键词 / 好友） ────────────────────────
+
+  /**
+   * 渲染一组可删除芯片。
+   * getList() 返回数组；onRemove(value) 负责改 state 并重画。
+   */
+  function renderChips(container, list, options) {
+    var opts = options || {}
+    container.textContent = ''
+    if (!list || list.length === 0) {
+      container.appendChild(el('span', 'qd-chip empty', opts.emptyText || '还没有配置'))
+      return
+    }
+    list.forEach(function (value) {
+      var chip = el('span', 'qd-chip')
+      chip.appendChild(el('span', null, String(value)))
+      if (opts.labelOf) {
+        var label = opts.labelOf(value)
+        if (label) chip.appendChild(el('span', 'name', label))
+      }
+      var btn = el('button', null, '×')
+      btn.type = 'button'
+      btn.title = '移除'
+      btn.addEventListener('click', function () { opts.onRemove(value) })
+      chip.appendChild(btn)
+      container.appendChild(chip)
+    })
+  }
+
+  function groups() { return Array.isArray(state.settings.listen && state.settings.listen.groups) ? state.settings.listen.groups : [] }
+  function keywords() { return Array.isArray(state.settings.listen && state.settings.listen.keywords) ? state.settings.listen.keywords : [] }
+  function friends() { return Array.isArray(state.settings.delivery && state.settings.delivery.friends) ? state.settings.delivery.friends : [] }
+  function excludedMap() {
+    var m = state.settings.listen && state.settings.listen.excludedSenders
+    return m && typeof m === 'object' && !Array.isArray(m) ? m : {}
+  }
+
+  function groupNameOf(gid) {
+    for (var i = 0; i < state.groups.length; i += 1) {
+      if (state.groups[i].groupId === String(gid)) return state.groups[i].groupName
+    }
+    return ''
+  }
+
+  function friendNameOf(uid) {
+    for (var i = 0; i < state.friends.length; i += 1) {
+      if (state.friends[i].userId === String(uid)) return state.friends[i].nickname || state.friends[i].remark
+    }
+    return ''
+  }
+
+  function addUnique(list, value) {
+    var v = String(value == null ? '' : value).trim()
+    if (!v) return false
+    if (list.indexOf(v) >= 0) return false
+    list.push(v)
+    return true
+  }
+
+  function redrawGroups() {
+    renderChips($('#group-chips'), groups(), {
+      emptyText: '还没有添加任何群',
+      labelOf: groupNameOf,
+      onRemove: function (value) {
+        setPath(state.settings, 'listen.groups', groups().filter(function (g) { return g !== value }))
+        markDirty('listen.groups')
+        redrawGroups()
+        redrawExcludeGroups()
+      },
+    })
+  }
+
+  function redrawKeywords() {
+    renderChips($('#keyword-chips'), keywords(), {
+      emptyText: '不过滤任何关键词',
+      onRemove: function (value) {
+        setPath(state.settings, 'listen.keywords', keywords().filter(function (k) { return k !== value }))
+        markDirty('listen.keywords')
+        redrawKeywords()
+      },
+    })
+  }
+
+  function redrawFriends() {
+    renderChips($('#friend-chips'), friends(), {
+      emptyText: '还没有配置接收好友',
+      labelOf: friendNameOf,
+      onRemove: function (value) {
+        setPath(state.settings, 'delivery.friends', friends().filter(function (f) { return f !== value }))
+        markDirty('delivery.friends')
+        redrawFriends()
+      },
+    })
+  }
+
+  function redrawExcluded() {
+    var gid = state.memberGroup
+    var list = (excludedMap()[gid] || [])
+    renderChips($('#excluded-chips'), list, {
+      emptyText: gid ? '这个群还没有排除任何成员' : '先选择要配置的群',
+      labelOf: function (uid) {
+        var m = memberById(uid)
+        return m ? (m.card || m.nickname) : ''
+      },
+      onRemove: function (uid) {
+        var map = Object.assign({}, excludedMap())
+        map[gid] = (map[gid] || []).filter(function (x) { return x !== uid })
+        if (map[gid].length === 0) delete map[gid]
+        setPath(state.settings, 'listen.excludedSenders', map)
+        markDirty('listen.excludedSenders')
+        redrawExcluded()
+      },
+    })
+  }
+
+  function memberById(uid) {
+    for (var i = 0; i < state.members.length; i += 1) {
+      if (state.members[i].userId === String(uid)) return state.members[i]
+    }
+    return null
+  }
+
+  function redrawExcludeGroups() {
+    var select = $('#exclude-group')
+    var current = state.memberGroup
+    select.textContent = ''
+    var list = groups()
+    if (list.length === 0) {
+      var opt = el('option', null, '（先在上面添加群）')
+      opt.value = ''
+      select.appendChild(opt)
+      select.disabled = true
+      state.memberGroup = ''
+      redrawExcluded()
+      return
+    }
+    select.disabled = false
+    list.forEach(function (gid) {
+      var name = groupNameOf(gid)
+      var opt = el('option', null, name ? name + '（' + gid + '）' : gid)
+      opt.value = gid
+      select.appendChild(opt)
+    })
+    if (!current || list.indexOf(current) < 0) current = list[0]
+    select.value = current
+    state.memberGroup = current
+    redrawExcluded()
+  }
+
+  // ── 群 / 好友 数据源 ──────────────────────────────────────
+
+  async function loadGroups() {
+    try {
+      var data = await api('/api/groups')
+      state.groups = data.available || []
+      var dl = $('#group-options')
+      dl.textContent = ''
+      state.groups.forEach(function (g) {
+        var opt = document.createElement('option')
+        opt.value = g.groupId
+        opt.label = g.groupName || g.groupId
+        dl.appendChild(opt)
+      })
+      $('#group-hint').textContent = state.groups.length > 0
+        ? '至少配置一个群号。已从 NapCat 拉到 ' + state.groups.length + ' 个群，可在输入框里直接选。'
+        : (data.error ? '拉取群列表失败：' + data.error : '至少配置一个群号，否则插件不会启动管线。')
+      redrawGroups()
+      redrawExcludeGroups()
+    } catch (error) {
+      $('#group-hint').textContent = '拉取群列表失败：' + error.message
+    }
+  }
+
+  async function loadFriends() {
+    try {
+      var data = await api('/api/friends')
+      state.friends = data.available || []
+      var dl = $('#friend-options')
+      dl.textContent = ''
+      state.friends.forEach(function (f) {
+        var opt = document.createElement('option')
+        opt.value = f.userId
+        opt.label = f.nickname || f.remark || f.userId
+        dl.appendChild(opt)
+      })
+      redrawFriends()
+    } catch (error) {
+      redrawFriends()
+    }
+  }
+
+  async function loadMembers(groupId) {
+    var box = $('#member-box')
+    if (!groupId) {
+      box.textContent = ''
+      return
+    }
+    box.textContent = ''
+    var loading = el('div', 'qd-state')
+    loading.appendChild(el('div', 'qd-spinner'))
+    loading.appendChild(el('span', null, '正在拉取群成员…'))
+    box.appendChild(loading)
+    try {
+      var data = await api('/api/members?groupId=' + encodeURIComponent(groupId))
+      state.members = data.members || []
+      if (data.error) {
+        box.textContent = ''
+        box.appendChild(el('div', 'qd-state err', '拉取成员失败：' + data.error))
+        return
+      }
+      renderMembers()
+    } catch (error) {
+      box.textContent = ''
+      box.appendChild(el('div', 'qd-state err', '拉取成员失败：' + error.message))
+    }
+  }
+
+  /** 按搜索词渲染成员候选列表（最多 60 条）。 */
+  function renderMembers() {
+    var box = $('#member-box')
+    var keyword = String($('#member-search').value || '').trim().toLowerCase()
+    box.textContent = ''
+    if (state.members.length === 0) {
+      box.appendChild(el('div', 'qd-state', '这个群还没有拉到成员，或者群成员列表为空。'))
+      return
+    }
+    var excluded = excludedMap()[state.memberGroup] || []
+    var hits = state.members.filter(function (m) {
+      if (!keyword) return true
+      return (m.nickname || '').toLowerCase().indexOf(keyword) >= 0 ||
+        (m.card || '').toLowerCase().indexOf(keyword) >= 0 ||
+        m.userId.indexOf(keyword) >= 0
+    })
+    if (hits.length === 0) {
+      box.appendChild(el('div', 'qd-state', '没有匹配「' + keyword + '」的成员'))
+      return
+    }
+    hits.slice(0, 60).forEach(function (m) {
+      var row = el('label', 'qd-member-row')
+      var cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.checked = excluded.indexOf(m.userId) >= 0
+      cb.addEventListener('change', function () {
+        var map = Object.assign({}, excludedMap())
+        var list = (map[state.memberGroup] || []).slice()
+        if (cb.checked) {
+          if (list.indexOf(m.userId) < 0) list.push(m.userId)
+        } else {
+          list = list.filter(function (x) { return x !== m.userId })
+        }
+        if (list.length === 0) delete map[state.memberGroup]
+        else map[state.memberGroup] = list
+        setPath(state.settings, 'listen.excludedSenders', map)
+        markDirty('listen.excludedSenders')
+        redrawExcluded()
+      })
+      row.appendChild(cb)
+      row.appendChild(el('span', 'qd-member-name', m.card || m.nickname || m.userId))
+      row.appendChild(el('span', 'qd-member-id', m.userId))
+      box.appendChild(row)
+    })
+  }
+
+  // ── 模型列表 ──────────────────────────────────────────────
+
+  async function loadModels() {
+    var providerSel = $('#provider-select')
+    var modelSel = $('#model-select')
+    try {
+      var data = await api('/api/models')
+      state.models = { providers: data.providers || [], current: data.current }
+      providerSel.textContent = ''
+      var emptyOpt = el('option', null, '（使用 DSH 默认模型）')
+      emptyOpt.value = ''
+      providerSel.appendChild(emptyOpt)
+      ;(data.providers || []).forEach(function (p) {
+        var opt = el('option', null, p.label || p.id)
+        opt.value = p.id
+        providerSel.appendChild(opt)
+      })
+      var cur = getPath(state.settings, 'model.provider') || ''
+      providerSel.value = cur
+      fillModelOptions()
+      $('#model-hint').textContent = data.error
+        ? '无法读取 DSH 模型列表：' + data.error + '。仍可手动在下方填写。'
+        : '留空表示使用 DSH 当前配置的默认模型。列表来自 DSH 的 LLM 服务。'
+    } catch (error) {
+      $('#model-hint').textContent = '无法读取 DSH 模型列表：' + error.message
+    }
+  }
+
+  function fillModelOptions() {
+    var providerSel = $('#provider-select')
+    var modelSel = $('#model-select')
+    var pid = providerSel.value
+    modelSel.textContent = ''
+    var emptyOpt = el('option', null, pid ? '（该提供商的默认模型）' : '（先选提供商）')
+    emptyOpt.value = ''
+    modelSel.appendChild(emptyOpt)
+    var found = null
+    ;(state.models.providers || []).forEach(function (p) { if (p.id === pid) found = p })
+    if (!found) {
+      modelSel.disabled = true
+      return
+    }
+    modelSel.disabled = false
+    ;(found.models || []).forEach(function (m) {
+      var opt = el('option', null, m.label || m.id)
+      opt.value = m.id
+      modelSel.appendChild(opt)
+    })
+    modelSel.value = getPath(state.settings, 'model.model') || ''
+  }
+
+  $('#provider-select').addEventListener('change', function () {
+    setPath(state.settings, 'model.provider', this.value)
+    setPath(state.settings, 'model.model', '')
+    markDirty('model.provider')
+    markDirty('model.model')
+    fillModelOptions()
+  })
+
+  $('#model-select').addEventListener('change', function () {
+    setPath(state.settings, 'model.model', this.value)
+    markDirty('model.model')
+  })
+
+  // ── 运行状态轮询 ──────────────────────────────────────────
+
+  function statusBadge(text, kind) {
+    var badge = $('#status-badge')
+    badge.textContent = text
+    badge.className = 'qd-badge' + (kind ? ' ' + kind : '')
+  }
+
+  function kvItem(key, value, kind) {
+    var item = el('div', 'qd-kv-item')
+    item.appendChild(el('div', 'qd-kv-key', key))
+    var val = el('div', 'qd-kv-val', value)
+    if (kind) val.style.color = 'var(--qd-' + kind + ')'
+    item.appendChild(val)
+    return item
+  }
+
+  async function refreshStatus() {
+    try {
+      var data = await api('/api/status')
+      var rt = data.runtime || {}
+      var http = data.http || {}
+      var pipeline = rt.pipeline || {}
+
+      statusBadge(rt.started ? '运行中' : '未启动', rt.started ? 'ok' : 'warn')
+
+      var kv = $('#status-kv')
+      kv.textContent = ''
+      kv.appendChild(kvItem('插件状态', rt.started ? '已启动' : (rt.startError ? '启动失败' : '未启动'), rt.started ? 'ok' : 'warn'))
+      kv.appendChild(kvItem('WS 连接', rt.ws && rt.ws.connected ? '已连接' : '未连接', rt.ws && rt.ws.connected ? 'ok' : 'warn'))
+      kv.appendChild(kvItem('累计重启', String(rt.restarts == null ? 0 : rt.restarts)))
+      kv.appendChild(kvItem('HTTP 服务', http.listening ? ('监听中 · ' + http.port) : (http.enabled ? '未监听' : '未开启'), http.listening ? 'ok' : 'warn'))
+      kv.appendChild(kvItem('日志条数', data.logs ? String(data.logs.total || 0) : '—'))
+      kv.appendChild(kvItem('已应用时间', fmtTime(rt.appliedAt)))
+
+      // 每群进度
+      var box = $('#status-groups')
+      box.textContent = ''
+      var groups = pipeline.groups || []
+      if (groups.length === 0) {
+        box.appendChild(el('div', 'qd-hint', '还没有开始累积消息（未监听到任何群或消息）。'))
+      } else {
+        groups.forEach(function (g) {
+          var row = el('div', 'qd-progress')
+          var name = el('div', 'qd-progress-name')
+          name.textContent = (g.groupName || '未命名群') + ' '
+          var code = el('code', null, g.groupId)
+          name.appendChild(code)
+          row.appendChild(name)
+          var pct = g.threshold > 0 ? Math.min(100, Math.round((g.pending / g.threshold) * 100)) : 0
+          var badge = el('span', 'qd-badge ' + (g.pending >= g.threshold ? 'ok' : ''), g.pending + ' / ' + g.threshold)
+          row.appendChild(badge)
+          var bar = el('div', 'qd-progress-bar')
+          var fill = el('i')
+          fill.style.width = pct + '%'
+          bar.appendChild(fill)
+          row.appendChild(bar)
+          box.appendChild(row)
+        })
+      }
+
+      // 最近错误
+      var errs = []
+      if (rt.startError) errs.push('启动：' + rt.startError)
+      if (Array.isArray(rt.configErrors)) errs = errs.concat(rt.configErrors)
+      if (http.error) errs.push('HTTP：' + http.error)
+      if (pipeline.stats && pipeline.stats.lastError) errs.push('管线：' + pipeline.stats.lastError)
+      $('#status-errors').textContent = errs.length > 0 ? errs.join('；') : '无'
+      $('#status-errors').style.color = errs.length > 0 ? 'var(--qd-err)' : ''
+
+      // 最近报告：每个群一块，绝不把多个群拼成一段
+      var recent = Array.isArray(rt.recent) ? rt.recent[0] : null
+      var reportBox = $('#status-report')
+      reportBox.textContent = ''
+      if (!recent) {
+        reportBox.textContent = '还没有投递过报告。'
+      } else {
+        var rgroups = Array.isArray(recent.groups) ? recent.groups : []
+        reportBox.appendChild(el('div', 'qd-hint', fmtTime(recent.at) + ' · 共 ' +
+          rgroups.length + ' 个群 · 成功 ' + (recent.delivered || 0) + ' / 失败 ' + (recent.failed || 0)))
+        if (rgroups.length === 0) {
+          reportBox.appendChild(el('div', 'qd-hint', '这一批没有产生任何群的总结。'))
+        } else {
+          rgroups.forEach(function (g) {
+            var block = el('div', 'qd-report-block')
+            var head = el('div', 'qd-report-head')
+            head.appendChild(el('strong', null, g.groupName || g.groupId || '未知群'))
+            head.appendChild(el('code', null, String(g.groupId || '')))
+            head.appendChild(el('span', 'qd-badge ' + (g.ok ? 'ok' : 'err'), g.ok ? '成功' : '失败'))
+            head.appendChild(el('span', 'qd-hint', (g.count == null ? 0 : g.count) + ' 条'))
+            block.appendChild(head)
+            reportBox.appendChild(block)
+          })
+        }
+        if (recent.outboxFile) {
+          reportBox.appendChild(el('div', 'qd-hint', 'outbox: ' + recent.outboxFile))
+        }
+      }
+
+      // HTTP 徽章
+      var httpBadge = $('#http-badge')
+      if (!http.enabled) {
+        httpBadge.textContent = '未开启'
+        httpBadge.className = 'qd-badge'
+      } else if (http.listening) {
+        httpBadge.textContent = '监听中 :' + http.port
+        httpBadge.className = 'qd-badge ok'
+      } else {
+        httpBadge.textContent = http.error ? '启动失败' : '未监听'
+        httpBadge.className = 'qd-badge err'
+        httpBadge.title = http.error || ''
+      }
+
+      // 卡片摘要
+      var statusSum = document.querySelector('[data-card="status"] [data-sum]')
+      if (statusSum) {
+        statusSum.textContent = rt.started
+          ? (rt.ws && rt.ws.connected ? '已连接 NapCat' : '未连接 NapCat') + ' · ' + groups.length + ' 个群在累积'
+          : '插件未启动'
+      }
+    } catch (error) {
+      statusBadge('状态不可用', 'err')
+      var kv = $('#status-kv')
+      kv.textContent = ''
+      var errBox = el('div', 'qd-state err', '读取运行状态失败：' + error.message)
+      kv.appendChild(errBox)
+    }
+  }
+
+  // ── 提示词卡片 ────────────────────────────────────────────
+
+  function updatePromptMeta() {
+    var text = $('#prompt-text').value
+    var max = state.prompt.maxChars || 20000
+    $('#prompt-count').textContent = text.length + ' / ' + max
+    $('#prompt-count').style.color = text.length > max ? 'var(--qd-err)' : ''
+    var badge = $('#prompt-badge')
+    if (state.promptDirty) {
+      badge.textContent = '未保存'
+      badge.className = 'qd-badge warn'
+    } else if (state.prompt.isDefault) {
+      badge.textContent = '默认'
+      badge.className = 'qd-badge'
+    } else {
+      badge.textContent = '已自定义'
+      badge.className = 'qd-badge accent'
+    }
+    $('#prompt-state').textContent = state.promptDirty
+      ? '有未保存的改动'
+      : (state.prompt.isDefault ? '当前使用内置默认提示词' : '当前使用自定义提示词')
+    var sum = document.querySelector('[data-card="prompt"] [data-sum]')
+    if (sum) sum.textContent = state.prompt.isDefault ? '内置默认' : '自定义 ' + state.prompt.system.length + ' 字符'
+  }
+
+  async function loadPrompt() {
+    try {
+      var data = await api('/api/prompt')
+      state.prompt = {
+        system: data.system || '',
+        effective: data.effective || data.defaultPrompt || '',
+        isDefault: data.isDefault !== false,
+        defaultPrompt: data.defaultPrompt || '',
+        maxChars: data.maxChars || 20000,
+        minChars: data.minChars || 10,
+      }
+      state.promptDirty = false
+      $('#prompt-text').value = state.prompt.system
+      updatePromptMeta()
+    } catch (error) {
+      $('#prompt-state').textContent = '读取提示词失败：' + error.message
+    }
+  }
+
+  $('#prompt-text').addEventListener('input', function () {
+    state.promptDirty = true
+    updatePromptMeta()
+  })
+
+  $('#btn-prompt-save').addEventListener('click', async function () {
+    var btn = this
+    btn.disabled = true
+    try {
+      var text = $('#prompt-text').value
+      var data = await api('/api/prompt', { method: 'POST', body: { system: text } })
+      state.prompt.system = data.system || ''
+      state.prompt.effective = data.effective || data.defaultPrompt || ''
+      state.prompt.isDefault = data.isDefault !== false
+      state.promptDirty = false
+      updatePromptMeta()
+      toast('提示词已保存，下一批总结生效', 'ok')
+    } catch (error) {
+      toast('保存失败：' + error.message, 'err')
+    } finally {
+      btn.disabled = false
+    }
+  })
+
+  $('#btn-prompt-reset').addEventListener('click', async function () {
+    if (!confirm('恢复默认提示词？当前的自定义内容会被清空。')) return
+    try {
+      await api('/api/prompt/reset', { method: 'POST', body: {} })
+      $('#prompt-text').value = ''
+      await loadPrompt()
+      toast('已恢复默认提示词', 'ok')
+    } catch (error) {
+      toast('恢复失败：' + error.message, 'err')
+    }
+  })
+
+  $('#btn-prompt-view').addEventListener('click', function () {
+    $('#modal-title').textContent = '内置默认提示词'
+    $('#modal-body').textContent = state.prompt.defaultPrompt || '（读取中…）'
+    $('#modal').classList.add('show')
+    if (!state.prompt.defaultPrompt) {
+      api('/api/prompt').then(function (data) {
+        state.prompt.defaultPrompt = data.defaultPrompt || ''
+        $('#modal-body').textContent = state.prompt.defaultPrompt
+      }).catch(function (error) {
+        $('#modal-body').textContent = '读取失败：' + error.message
+      })
+    }
+  })
+
+  // ── 弹层 ──────────────────────────────────────────────────
+
+  function closeModal() { $('#modal').classList.remove('show') }
+  $('#modal-close').addEventListener('click', closeModal)
+  $('#modal-ok').addEventListener('click', closeModal)
+  $('#modal').addEventListener('click', function (event) {
+    if (event.target === this) closeModal()
+  })
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') closeModal()
+  })
+  $('#modal-copy').addEventListener('click', async function () {
+    try {
+      await navigator.clipboard.writeText($('#modal-body').textContent)
+      toast('已复制', 'ok')
+    } catch (error) {
+      toast('复制失败，请手动选中复制', 'err')
+    }
+  })
+
+  // ── 保存 / 撤销 / 恢复初始 ────────────────────────────────
+
+  /** 只提交脏字段：白名单里没有的路径后端会丢弃，这里先过滤一遍。 */
+  function dirtyPayload() {
+    var out = {}
+    var keys = Object.keys(state.dirty)
+    if (keys.length === 0) return out
+    // 提交整份 settings 更简单，但会把没改的字段一起写回覆盖项。
+    // 这里只回填脏字段，其余保持 settings.json 原样。
+    keys.forEach(function (path) {
+      var value = getPath(state.settings, path)
+      if (value === undefined) return
+      setPath(out, path, value)
+    })
+    return out
+  }
+
+  async function loadSettings() {
+    var data = await api('/api/settings')
+    state.settings = data.settings || {}
+    state.defaults = data.defaults || DEFAULTS_FALLBACK
+    state.original = JSON.stringify(state.settings)
+    fillFields()
+    redrawGroups()
+    redrawKeywords()
+    redrawFriends()
+    redrawExcludeGroups()
+    $('#token-masked').textContent = (state.settings.httpServer && state.settings.httpServer.token) || '未生成'
+    $('#head-sub').textContent = state.settings.settingsFile
+      ? '配置来自 DSH 插件设置，修改后保存即热生效。'
+      : '配置来自 DSH 插件设置，修改后保存即热生效。'
+    updateCardSums()
+  }
+
+  /** 卡片标题右侧的一句话摘要。 */
+  function updateCardSums() {
+    var s = state.settings
+    function sum(card, text) {
+      var node = document.querySelector('[data-card="' + card + '"] [data-sum]')
+      if (node) node.textContent = text
+    }
+    sum('http', (s.httpServer && s.httpServer.enabled ? '已开启' : '未开启') + ' · 端口 ' + ((s.httpServer && s.httpServer.port) || 1213))
+    sum('listen', groups().length + ' 个群' + (s.listen && s.listen.ignoreSelf ? ' · 忽略自己' : ''))
+    var kw = keywords().length
+    var ex = Object.keys(excludedMap()).length
+    sum('filter', kw + ' 个关键词 · ' + ex + ' 个群配了成员排除')
+    sum('batch', '阈值 ' + ((s.batch && s.batch.threshold) || 100) + ' 条')
+    var prov = getPath(s, 'model.provider')
+    sum('model', prov ? prov + ' / ' + (getPath(s, 'model.model') || '默认') : 'DSH 默认模型')
+    sum('delivery', friends().length + ' 位好友' + (s.dryRun ? ' · 预演模式' : ''))
+    sum('storage', '日志保留 ' + ((s.storage && s.storage.keepDays) || 7) + ' 天' + (s.dryRun ? ' · dryRun' : ''))
+    sum('prompt', state.prompt.isDefault ? '内置默认' : '自定义 ' + state.prompt.system.length + ' 字符')
+  }
+
+  $('#btn-save').addEventListener('click', async function () {
+    var btn = this
+    var payload = dirtyPayload()
+    if (Object.keys(payload).length === 0) {
+      toast('没有需要保存的改动')
+      return
+    }
+    btn.disabled = true
+    btn.textContent = '保存中…'
+    try {
+      var data = await api('/api/settings', { method: 'POST', body: { settings: payload } })
+      clearDirty()
+      await loadSettings()
+      await refreshStatus()
+      var dropped = data.droppedFields || []
+      if (dropped.length > 0) {
+        toast('已保存，但以下字段不被允许修改：' + dropped.join('、'), 'warn')
+      } else if (Array.isArray(data.configErrors) && data.configErrors.length > 0) {
+        toast('已保存，但配置有告警：' + data.configErrors.join('；'), 'warn')
+      } else {
+        toast('已保存并生效', 'ok')
+      }
+    } catch (error) {
+      toast('保存失败：' + error.message, 'err')
+    } finally {
+      btn.disabled = false
+      btn.textContent = '保存并生效'
+    }
+  })
+
+  $('#btn-revert').addEventListener('click', async function () {
+    if (dirtyCount() === 0) {
+      toast('没有需要撤销的改动')
+      return
+    }
+    await loadSettings()
+    clearDirty()
+    toast('已撤销改动', 'ok')
+  })
+
+  $('#btn-defaults').addEventListener('click', async function () {
+    if (!confirm('恢复初始配置？会清空所有本地覆盖项（提示词与访问密钥会保留）。')) return
+    try {
+      await api('/api/settings/reset', { method: 'POST', body: {} })
+      clearDirty()
+      await loadSettings()
+      await refreshStatus()
+      toast('已恢复初始配置', 'ok')
+    } catch (error) {
+      toast('恢复失败：' + error.message, 'err')
+    }
+  })
+
+  // ── 即时操作 ──────────────────────────────────────────────
+
+  $('#btn-flush').addEventListener('click', async function () {
+    if (!confirm('立即总结当前批次？会把各群已累积的消息提前冻结并投递。')) return
+    var btn = this
+    btn.disabled = true
+    try {
+      var data = await api('/api/flush', { method: 'POST', body: {} })
+      toast('已触发：成功 ' + (data.delivered || 0) + ' / 失败 ' + (data.failed || 0), 'ok')
+      await refreshStatus()
+    } catch (error) {
+      toast('触发失败：' + error.message, 'err')
+    } finally {
+      btn.disabled = false
+    }
+  })
+
+  $('#btn-refresh').addEventListener('click', function () {
+    refreshStatus()
+    toast('已刷新')
+  })
+
+  $('#btn-test').addEventListener('click', async function () {
+    var btn = this
+    btn.disabled = true
+    try {
+      var text = String($('#test-text').value || '').trim()
+      var data = await api('/api/test', { method: 'POST', body: text ? { text: text } : {} })
+      var results = data.results || []
+      var okCount = results.filter(function (r) { return r.ok }).length
+      if (data.ok) toast('测试消息已发送（成功 ' + okCount + ' / ' + results.length + '）', 'ok')
+      else toast('测试消息发送失败：' + results.map(function (r) { return r.error || r.userId }).join('；'), 'err')
+    } catch (error) {
+      toast('发送失败：' + error.message, 'err')
+    } finally {
+      btn.disabled = false
+    }
+  })
+
+  $('#btn-token').addEventListener('click', async function () {
+    if (!confirm('重新生成访问密钥？所有已登录的浏览器会立刻掉线，需要重新输入新密钥。')) return
+    try {
+      var data = await api('/api/token/generate', { method: 'POST', body: {} })
+      $('#token-masked').textContent = data.tokenMasked || ''
+      $('#modal-title').textContent = '新的访问密钥（只显示这一次）'
+      $('#modal-body').textContent = data.token || ''
+      $('#modal').classList.add('show')
+      toast('密钥已重新生成', 'ok')
+    } catch (error) {
+      toast('生成失败：' + error.message, 'err')
+    }
+  })
+
+  $('#btn-logout').addEventListener('click', async function () {
+    try {
+      await fetch('/api/logout', { method: 'POST' })
+    } catch (error) { /* 忽略 */ }
+    location.replace('/login')
+  })
+
+  // ── 输入辅助 ──────────────────────────────────────────────
+
+  function bindChipInput(inputId, addBtnId, getList, setList, redraw, dirtyPath) {
+    var input = $('#' + inputId)
+    var add = $('#' + addBtnId)
+    function commit() {
+      var value = String(input.value || '').trim()
+      if (!value) return
+      var list = getList().slice()
+      if (!addUnique(list, value)) {
+        toast('「' + value + '」已经在列表里了')
+        return
+      }
+      setList(list)
+      markDirty(dirtyPath)
+      input.value = ''
+      redraw()
+    }
+    add.addEventListener('click', commit)
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        commit()
+      }
+    })
+  }
+
+  bindChipInput('group-input', 'group-add', groups, function (list) {
+    setPath(state.settings, 'listen.groups', list)
+  }, function () {
+    redrawGroups()
+    redrawExcludeGroups()
+    updateCardSums()
+  }, 'listen.groups')
+
+  bindChipInput('keyword-input', 'keyword-add', keywords, function (list) {
+    setPath(state.settings, 'listen.keywords', list)
+  }, function () {
+    redrawKeywords()
+    updateCardSums()
+  }, 'listen.keywords')
+
+  bindChipInput('friend-input', 'friend-add', friends, function (list) {
+    setPath(state.settings, 'delivery.friends', list)
+  }, function () {
+    redrawFriends()
+    updateCardSums()
+  }, 'delivery.friends')
+
+  $('#exclude-group').addEventListener('change', function () {
+    state.memberGroup = this.value
+    state.members = []
+    redrawExcluded()
+    loadMembers(state.memberGroup)
+  })
+
+  $('#member-search').addEventListener('input', function () {
+    renderMembers()
+  })
+
+  // ── 启动 ──────────────────────────────────────────────────
+
+  async function boot() {
+    try {
+      await loadSettings()
+    } catch (error) {
+      $('#head-sub').textContent = '读取配置失败：' + error.message
+      toast('读取配置失败：' + error.message, 'err')
+      return
+    }
+    await Promise.all([loadPrompt(), loadModels(), loadGroups(), loadFriends()])
+    if (state.memberGroup) loadMembers(state.memberGroup)
+    await refreshStatus()
+    state.statusTimer = setInterval(refreshStatus, 5000)
+  }
+
+  boot()
+})()
+</script>
+</body>
+</html>

@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日志 · QQ 群总结</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div class="qd-topbar">
+  <div class="qd-brand"><span class="qd-logo">QQ</span><span>QQ 群总结</span></div>
+  <nav class="qd-nav">
+    <a href="/">配置</a>
+    <a href="/logs" class="active">日志</a>
+    <a href="/summaries">总结记录</a>
+  </nav>
+  <div class="qd-topbar-right">
+    <button class="qd-btn ghost sm" id="btn-logout" type="button">退出登录</button>
+  </div>
+</div>
+
+<main class="qd-main">
+  <div class="qd-page-head">
+    <h1 class="qd-page-title">日志</h1>
+    <p class="qd-page-sub" id="log-stats">正在加载…</p>
+  </div>
+
+  <div class="qd-filters">
+    <div class="qd-field">
+      <label for="f-level">级别</label>
+      <select class="qd-select" id="f-level">
+        <option value="">全部</option>
+        <option value="debug">debug</option>
+        <option value="info">info</option>
+        <option value="warn">warn</option>
+        <option value="error">error</option>
+      </select>
+    </div>
+    <div class="qd-field">
+      <label for="f-group">群号</label>
+      <input class="qd-input" id="f-group" placeholder="全部群">
+    </div>
+    <div class="qd-field">
+      <label for="f-keyword">关键字</label>
+      <input class="qd-input" id="f-keyword" placeholder="消息 / scope / extra 里包含…">
+    </div>
+    <div class="qd-field">
+      <label for="f-since">起始时间</label>
+      <input class="qd-input" id="f-since" type="datetime-local">
+    </div>
+    <div class="qd-field">
+      <label for="f-until">结束时间</label>
+      <input class="qd-input" id="f-until" type="datetime-local">
+    </div>
+    <div class="qd-field">
+      <label>&nbsp;</label>
+      <div class="qd-inline">
+        <button class="qd-btn primary sm" type="button" id="btn-query">查询</button>
+        <button class="qd-btn ghost sm" type="button" id="btn-clear">清空条件</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="qd-logbox">
+    <div class="qd-logbar">
+      <label class="qd-switch">
+        <input type="checkbox" id="auto-scroll" checked>
+        <span class="qd-switch-track"></span>
+        <span>自动滚到最新</span>
+      </label>
+      <label class="qd-switch">
+        <input type="checkbox" id="live-on" checked>
+        <span class="qd-switch-track"></span>
+        <span>实时推送</span>
+      </label>
+      <span class="qd-badge" id="live-badge">连接中</span>
+      <span class="qd-grow"></span>
+      <span class="qd-hint" id="page-hint"></span>
+      <button class="qd-btn ghost sm" type="button" id="btn-export">导出 .jsonl</button>
+    </div>
+
+    <div class="qd-loglist" id="log-list"></div>
+
+    <div style="padding:10px;border-top:1px solid var(--qd-border);display:flex;justify-content:center">
+      <button class="qd-btn ghost sm" type="button" id="btn-more" style="display:none">加载更多</button>
+    </div>
+  </div>
+</main>
+
+<div class="qd-toasts" id="toasts"></div>
+
+<script>
+(function () {
+  'use strict'
+
+  var PAGE_SIZE = 500
+  var MAX_KEEP = 2000
+
+  var state = {
+    entries: [],
+    seqSet: {},
+    loading: false,
+    hasMore: false,
+    offset: 0,
+    total: 0,
+    filter: { level: '', groupId: '', keyword: '', since: '', until: '' },
+    live: null,
+    expanded: {},
+    lastSeq: 0,
+  }
+
+  function $(sel) { return document.querySelector(sel) }
+  function el(tag, cls, text) {
+    var node = document.createElement(tag)
+    if (cls) node.className = cls
+    if (text != null) node.textContent = text
+    return node
+  }
+
+  async function api(path, options) {
+    var res = await fetch(path, options || {})
+    if (res.status === 401) {
+      location.replace('/login')
+      throw new Error('未登录')
+    }
+    var data = null
+    try { data = await res.json() } catch (e) { data = null }
+    if (!res.ok || (data && data.ok === false)) {
+      throw new Error((data && data.error) || ('请求失败（HTTP ' + res.status + '）'))
+    }
+    return data || {}
+  }
+
+  function toast(text, kind) {
+    var box = $('#toasts')
+    var node = el('div', 'qd-toast ' + (kind || ''), text)
+    box.appendChild(node)
+    setTimeout(function () {
+      node.style.opacity = '0'
+      setTimeout(function () { node.remove() }, 200)
+    }, kind === 'err' ? 5200 : 2600)
+  }
+
+  function pad2(n) { return n < 10 ? '0' + n : String(n) }
+
+  function clock(ms) {
+    var d = new Date(Number(ms) || 0)
+    if (isNaN(d.getTime())) return '--:--:--'
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds())
+  }
+
+  function dayTime(ms) {
+    var d = new Date(Number(ms) || 0)
+    if (isNaN(d.getTime())) return ''
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+      ' ' + clock(ms)
+  }
+
+  /** 三态渲染：加载中 / 空 / 失败。 */
+  function renderState(kind, text) {
+    var list = $('#log-list')
+    list.textContent = ''
+    var box = el('div', 'qd-state' + (kind === 'err' ? ' err' : ''))
+    if (kind === 'loading') box.appendChild(el('div', 'qd-spinner'))
+    box.appendChild(el('div', null, text))
+    list.appendChild(box)
+  }
+
+  // ── 渲染 ──────────────────────────────────────────────────
+
+  function renderRow(entry) {
+    var row = el('div', 'qd-logrow')
+    row.appendChild(el('span', 't', clock(entry.at)))
+    var lv = el('span', 'lv ' + (entry.level || 'info'), entry.level || 'info')
+    row.appendChild(lv)
+    row.appendChild(el('span', 's', entry.scope || '—'))
+    row.appendChild(el('span', 'm', entry.msg || ''))
+
+    var hasExtra = entry.extra && typeof entry.extra === 'object' && Object.keys(entry.extra).length > 0
+    if (hasExtra) {
+      row.title = '点击展开 extra'
+      var extra = el('pre', 'qd-logextra')
+      try { extra.textContent = JSON.stringify(entry.extra, null, 2) } catch (e) { extra.textContent = String(entry.extra) }
+      extra.style.display = state.expanded[entry.seq] ? 'block' : 'none'
+      row.appendChild(extra)
+      row.addEventListener('click', function () {
+        state.expanded[entry.seq] = !state.expanded[entry.seq]
+        extra.style.display = state.expanded[entry.seq] ? 'block' : 'none'
+      })
+    }
+    return row
+  }
+
+  function renderAll() {
+    var list = $('#log-list')
+    list.textContent = ''
+    if (state.entries.length === 0) {
+      var empty = state.filter.level || state.filter.groupId || state.filter.keyword
+        ? '当前筛选条件下没有日志。试试放宽条件，或者等新的日志产生。'
+        : '还没有日志。插件启动后，连接、批次、总结、投递的每一步都会记录在这里。'
+      renderState('empty', empty)
+      $('#btn-more').style.display = 'none'
+      return
+    }
+    // 最新的在最上面：entries 由 API 返回时已是倒序
+    var frag = document.createDocumentFragment()
+    state.entries.forEach(function (entry) { frag.appendChild(renderRow(entry)) })
+    list.appendChild(frag)
+    $('#btn-more').style.display = state.hasMore ? 'inline-flex' : 'none'
+    $('#page-hint').textContent = '已显示 ' + state.entries.length + ' / ' + state.total + ' 条'
+  }
+
+  /** 追加新推送的行（在顶部），并裁剪到 MAX_KEEP。 */
+  function appendLive(entries) {
+    var list = $('#log-list')
+    var atTop = list.scrollTop < 40
+    var empty = list.querySelector('.qd-state')
+    if (empty) list.textContent = ''
+
+    var added = 0
+    var frag = document.createDocumentFragment()
+    // entries 升序，倒着插到最前面保持最新在上
+    for (var i = entries.length - 1; i >= 0; i -= 1) {
+      var entry = entries[i]
+      if (state.seqSet[entry.seq]) continue
+      if (!matchFilter(entry)) continue
+      state.seqSet[entry.seq] = true
+      state.entries.unshift(entry)
+      frag.appendChild(renderRow(entry))
+      added += 1
+    }
+    if (added === 0) return
+    list.insertBefore(frag, list.firstChild)
+
+    while (state.entries.length > MAX_KEEP) {
+      state.entries.pop()
+      var last = list.lastChild
+      if (last) last.remove()
+    }
+
+    state.total += added
+    $('#page-hint').textContent = '已显示 ' + state.entries.length + ' / ' + state.total + ' 条'
+    if ($('#auto-scroll').checked && atTop) list.scrollTop = 0
+  }
+
+  /** 客户端侧再过滤一遍（SSE 推送不保证服务端筛选）。 */
+  function matchFilter(entry) {
+    var f = state.filter
+    if (f.level && entry.level !== f.level) return false
+    if (f.groupId && String(entry.groupId || '') !== f.groupId) return false
+    if (f.keyword) {
+      var kw = f.keyword.toLowerCase()
+      var hay = String(entry.msg || '') + ' ' + String(entry.scope || '') + ' ' + String(entry.groupId || '')
+      try { hay += ' ' + JSON.stringify(entry.extra || {}) } catch (e) { /* 忽略 */ }
+      if (hay.toLowerCase().indexOf(kw) < 0) return false
+    }
+    if (f.since && entry.at < f.since) return false
+    if (f.until && entry.at > f.until) return false
+    return true
+  }
+
+  // ── 拉取 ──────────────────────────────────────────────────
+
+  function queryString(extra) {
+    var f = state.filter
+    var params = new URLSearchParams()
+    if (f.level) params.set('level', f.level)
+    if (f.groupId) params.set('groupId', f.groupId)
+    if (f.keyword) params.set('keyword', f.keyword)
+    if (f.since) params.set('since', String(f.since))
+    if (f.until) params.set('until', String(f.until))
+    params.set('limit', String(PAGE_SIZE))
+    if (extra && extra.offset) params.set('offset', String(extra.offset))
+    return params.toString()
+  }
+
+  async function load(reset) {
+    if (state.loading) return
+    state.loading = true
+    if (reset) {
+      state.entries = []
+      state.seqSet = {}
+      state.offset = 0
+      renderState('loading', '正在加载日志…')
+    } else {
+      $('#btn-more').disabled = true
+    }
+    try {
+      var data = await api('/api/logs?' + queryString({ offset: state.offset }))
+      var batch = data.entries || []
+      var stats = data.stats || {}
+      if (reset) {
+        state.entries = batch
+        state.seqSet = {}
+        batch.forEach(function (e) { state.seqSet[e.seq] = true })
+        state.lastSeq = batch.length > 0 ? Math.max.apply(null, batch.map(function (e) { return e.seq })) : 0
+      } else {
+        batch.forEach(function (e) {
+          if (state.seqSet[e.seq]) return
+          state.seqSet[e.seq] = true
+          state.entries.push(e)
+        })
+      }
+      state.total = Number(stats.total || batch.length)
+      state.hasMore = batch.length >= PAGE_SIZE
+      state.offset += batch.length
+      renderAll()
+      renderStats(stats)
+    } catch (error) {
+      renderState('err', '加载日志失败：' + error.message)
+      toast('加载日志失败：' + error.message, 'err')
+    } finally {
+      state.loading = false
+      $('#btn-more').disabled = false
+    }
+  }
+
+  function renderStats(stats) {
+    var parts = []
+    if (stats.total != null) parts.push('累计 ' + stats.total + ' 条')
+    if (stats.memory != null) parts.push('内存 ' + stats.memory + ' / ' + stats.maxMemory)
+    if (stats.byLevel) {
+      parts.push('info ' + (stats.byLevel.info || 0))
+      parts.push('warn ' + (stats.byLevel.warn || 0))
+      parts.push('error ' + (stats.byLevel.error || 0))
+    }
+    if (stats.files != null) parts.push('落盘 ' + stats.files + ' 个文件')
+    if (stats.lastError) parts.push('落盘异常：' + stats.lastError)
+    $('#log-stats').textContent = parts.join(' · ') || '暂无统计'
+    if (stats.lastError) $('#log-stats').style.color = 'var(--qd-err)'
+    else $('#log-stats').style.color = ''
+  }
+
+  // ── SSE 实时推送 ──────────────────────────────────────────
+
+  function setLiveBadge(text, kind) {
+    var badge = $('#live-badge')
+    badge.textContent = text
+    badge.className = 'qd-badge' + (kind ? ' ' + kind : '')
+  }
+
+  function connectLive() {
+    disconnectLive()
+    if (!$('#live-on').checked) {
+      setLiveBadge('已暂停', 'warn')
+      return
+    }
+    setLiveBadge('连接中')
+    var source = new EventSource('/api/logs/stream?since=' + state.lastSeq)
+    state.live = source
+
+    source.onopen = function () { setLiveBadge('实时中', 'ok') }
+
+    source.onmessage = function (event) {
+      var payload = null
+      try { payload = JSON.parse(event.data) } catch (e) { return }
+      if (!payload) return
+      var entries = payload.entries || []
+      if (entries.length > 0) {
+        state.lastSeq = Math.max(state.lastSeq, entries[entries.length - 1].seq)
+        appendLive(entries)
+      }
+      if (payload.stats) renderStats(payload.stats)
+    }
+
+    source.onerror = function () {
+      // EventSource 自己会重连（服务端下发了 retry: 3000）。
+      setLiveBadge('重连中', 'warn')
+    }
+  }
+
+  function disconnectLive() {
+    if (state.live) {
+      state.live.close()
+      state.live = null
+    }
+  }
+
+  // ── 导出 ──────────────────────────────────────────────────
+
+  function exportJsonl() {
+    if (state.entries.length === 0) {
+      toast('没有可导出的日志')
+      return
+    }
+    var lines = state.entries.map(function (e) {
+      try { return JSON.stringify(e) } catch (err) { return '' }
+    }).filter(Boolean)
+    var blob = new Blob([lines.join('\n') + '\n'], { type: 'application/x-ndjson;charset=utf-8' })
+    var url = URL.createObjectURL(blob)
+    var a = document.createElement('a')
+    a.href = url
+    a.download = 'qq-digest-logs-' + Date.now() + '.jsonl'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(function () { URL.revokeObjectURL(url) }, 4000)
+    toast('已导出 ' + lines.length + ' 条', 'ok')
+  }
+
+  // ── 事件绑定 ──────────────────────────────────────────────
+
+  function readFilter() {
+    state.filter = {
+      level: $('#f-level').value,
+      groupId: String($('#f-group').value || '').trim(),
+      keyword: String($('#f-keyword').value || '').trim(),
+      since: $('#f-since').value ? new Date($('#f-since').value).getTime() : '',
+      until: $('#f-until').value ? new Date($('#f-until').value).getTime() : '',
+    }
+  }
+
+  $('#btn-query').addEventListener('click', function () {
+    readFilter()
+    load(true)
+  })
+
+  $('#btn-clear').addEventListener('click', function () {
+    $('#f-level').value = ''
+    $('#f-group').value = ''
+    $('#f-keyword').value = ''
+    $('#f-since').value = ''
+    $('#f-until').value = ''
+    readFilter()
+    load(true)
+  })
+
+  ;['f-level', 'f-group', 'f-keyword'].forEach(function (id) {
+    var node = document.getElementById(id)
+    node.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        readFilter()
+        load(true)
+      }
+    })
+    if (node.tagName === 'SELECT') {
+      node.addEventListener('change', function () {
+        readFilter()
+        load(true)
+      })
+    }
+  })
+
+  $('#btn-more').addEventListener('click', function () { load(false) })
+  $('#btn-export').addEventListener('click', exportJsonl)
+
+  $('#live-on').addEventListener('change', function () {
+    if (this.checked) connectLive()
+    else {
+      disconnectLive()
+      setLiveBadge('已暂停', 'warn')
+    }
+  })
+
+  $('#btn-logout').addEventListener('click', async function () {
+    try { await fetch('/api/logout', { method: 'POST' }) } catch (e) { /* 忽略 */ }
+    location.replace('/login')
+  })
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) disconnectLive()
+    else if ($('#live-on').checked) connectLive()
+  })
+
+  readFilter()
+  load(true)
+  connectLive()
+})()
+</script>
+</body>
+</html>

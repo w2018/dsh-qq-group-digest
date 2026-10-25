@@ -1,6 +1,6 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -150,4 +150,92 @@ test('root 为空时不落盘，只在内存里工作', () => {
   hist.append('1', { text: '仅内存', at: 1700000000 })
   assert.equal(hist.load('1').length, 1)
   assert.equal(hist.latest('1').text, '仅内存')
+})
+
+test('P4 结构化字段：participants/md/model/attempts/aiDetail 正常读写并落盘', () => {
+  const root = makeRoot()
+  const hist = new SummaryHistory(root)
+  const item = hist.append('100000001', {
+    text: '本批主线',
+    at: 1700000000,
+    batchId: 'b-1',
+    participants: [
+      { id: '123456', name: '王五', count: 7 },
+      { id: '654321', name: '张三', count: 3 },
+    ],
+    md: '# 100000001 · AI大模型交流\n\n## 一、本批主线\n本批主线',
+    model: 'workbuddy/deepseek-v4.1-flash',
+    attempts: 2,
+    aiDetail: true,
+  })
+  assert.deepEqual(item.participants, [
+    { id: '123456', name: '王五', count: 7 },
+    { id: '654321', name: '张三', count: 3 },
+  ])
+  assert.match(item.md, /^# 100000001/)
+  assert.equal(item.model, 'workbuddy/deepseek-v4.1-flash')
+  assert.equal(item.attempts, 2)
+  assert.equal(item.aiDetail, true)
+
+  const reopened = new SummaryHistory(root)
+  const entry = reopened.latest('100000001')
+  assert.equal(entry.participants.length, 2)
+  assert.equal(entry.participants[0].name, '王五')
+  assert.equal(entry.model, 'workbuddy/deepseek-v4.1-flash')
+  assert.equal(entry.attempts, 2)
+  assert.equal(entry.aiDetail, true)
+  assert.match(entry.md, /本批主线/)
+})
+
+test('P4 新字段缺省时给安全默认值（空数组 / 空串 / 0 / false）', () => {
+  const hist = new SummaryHistory(makeRoot())
+  const item = hist.append('1', { text: '只有正文', at: 1700000000 })
+  assert.deepEqual(item.participants, [])
+  assert.equal(item.md, '')
+  assert.equal(item.model, '')
+  assert.equal(item.attempts, 0)
+  assert.equal(item.aiDetail, false)
+})
+
+test('P4 向后兼容：旧存档缺新字段时读取不报错，按空处理', () => {
+  const root = makeRoot()
+  const legacy = {
+    groupId: '1',
+    entries: [
+      { at: 1699990000, batchId: 'old-1', count: 3, firstSec: 1699980000, lastSec: 1699989999, ok: true, text: '旧版总结正文', delivered: 1, failed: 0, outboxFile: '' },
+    ],
+  }
+  writeFileSync(join(root, '1.json'), JSON.stringify(legacy), 'utf8')
+
+  const hist = new SummaryHistory(root)
+  const entry = hist.latest('1')
+  assert.equal(entry.text, '旧版总结正文')
+  assert.equal(entry.participants, undefined)
+  assert.equal(entry.md, undefined)
+  assert.equal(entry.model, undefined)
+  assert.equal(entry.attempts, undefined)
+  assert.equal(entry.aiDetail, undefined)
+  // 在旧条目基础上追加新条目，两条共存且字段互不影响
+  hist.append('1', { text: '新版总结', at: 1700000000, participants: [{ id: '9', name: '甲', count: 1 }], aiDetail: true })
+  assert.equal(hist.load('1').length, 2)
+  assert.equal(hist.latest('1').aiDetail, true)
+})
+
+test('P4 md 单独上限 20000，超了截断并加标记；text 上限仍是 6000', () => {
+  const hist = new SummaryHistory(makeRoot())
+  const item = hist.append('1', { text: 'a'.repeat(7000), md: 'b'.repeat(20050), at: 1700000000 })
+  assert.equal(item.text, 'a'.repeat(6000) + '…(截断)')
+  assert.equal(item.md, 'b'.repeat(20000) + '…(截断)')
+})
+
+test('P4 participants 归一化：丢弃非法项、补齐 name、限制最多 30 个', () => {
+  const hist = new SummaryHistory(makeRoot())
+  const raw = [null, 'x', { id: '' }, { id: '7' }]
+  for (let i = 0; i < 40; i += 1) raw.push({ id: String(100 + i), name: 'n' + i, count: i })
+  const item = hist.append('1', { text: 't', at: 1700000000, participants: raw })
+  assert.equal(item.participants.length, 30)
+  assert.deepEqual(item.participants[0], { id: '7', name: '7', count: 0 })
+  assert.equal(item.participants[1].id, '100')
+  assert.equal(item.participants[1].count, 0)
+  assert.equal(item.participants[29].id, '128')
 })

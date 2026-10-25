@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { resolveConfig, deepMerge, normalizeIdList, storageRoot } from '../lib/config.js'
+import { EDITABLE_FIELDS, sanitizeOverride } from '../lib/store/settings.js'
 
 test('deepMerge 递归合并且数组整体替换', () => {
   const out = deepMerge({ a: { b: 1, c: 2 }, list: [1, 2] }, { a: { c: 9 }, list: [3] })
@@ -93,4 +94,121 @@ test('resolveConfig model.maxHistoryChars 默认 2000 并 clamp 到 0..20000', (
 
   const lo = resolveConfig({ listen: { groups: ['1'] }, delivery: { friends: ['2'] }, model: { maxHistoryChars: -1 } })
   assert.equal(lo.config.model.maxHistoryChars, 0)
+})
+
+const BASE = { listen: { groups: ['1'] }, delivery: { friends: ['2'] } }
+
+function resolve(extra) {
+  return resolveConfig(Object.assign({}, BASE, extra || {}))
+}
+
+test('resolveConfig httpServer 默认关闭、端口 1213、监听 0.0.0.0、鉴权开启', () => {
+  const { config, errors } = resolve()
+  assert.deepEqual(config.httpServer, {
+    enabled: false,
+    port: 1213,
+    host: '0.0.0.0',
+    authEnabled: true,
+    token: '',
+    sessionHours: 168,
+  })
+  assert.deepEqual(errors, [])
+})
+
+test('resolveConfig httpServer.port clamp 到 1024..65535', () => {
+  assert.equal(resolve({ httpServer: { port: 80 } }).config.httpServer.port, 1024)
+  assert.equal(resolve({ httpServer: { port: 99999 } }).config.httpServer.port, 65535)
+  assert.equal(resolve({ httpServer: { port: 1213 } }).config.httpServer.port, 1213)
+  assert.equal(resolve({ httpServer: { port: 'abc' } }).config.httpServer.port, 1213)
+})
+
+test('resolveConfig httpServer.host 空值回落 0.0.0.0', () => {
+  assert.equal(resolve({ httpServer: { host: '  ' } }).config.httpServer.host, '0.0.0.0')
+  assert.equal(resolve({ httpServer: { host: null } }).config.httpServer.host, '0.0.0.0')
+  assert.equal(resolve({ httpServer: { host: ' 127.0.0.1 ' } }).config.httpServer.host, '127.0.0.1')
+})
+
+test('resolveConfig httpServer.sessionHours clamp 到 1..8760', () => {
+  assert.equal(resolve({ httpServer: { sessionHours: 0 } }).config.httpServer.sessionHours, 1)
+  assert.equal(resolve({ httpServer: { sessionHours: 999999 } }).config.httpServer.sessionHours, 8760)
+  assert.equal(resolve({ httpServer: { sessionHours: 24 } }).config.httpServer.sessionHours, 24)
+})
+
+test('resolveConfig httpServer.enabled 只认严格 true，authEnabled 只认严格 false 关闭', () => {
+  assert.equal(resolve({ httpServer: { enabled: 'yes' } }).config.httpServer.enabled, false)
+  assert.equal(resolve({ httpServer: { enabled: true } }).config.httpServer.enabled, true)
+  assert.equal(resolve({ httpServer: { authEnabled: false } }).config.httpServer.authEnabled, false)
+  assert.equal(resolve({ httpServer: { authEnabled: 0 } }).config.httpServer.authEnabled, true)
+})
+
+test('resolveConfig httpServer.token trim 且允许为空', () => {
+  assert.equal(resolve({ httpServer: { token: '  abc  ' } }).config.httpServer.token, 'abc')
+  assert.equal(resolve({ httpServer: { token: null } }).config.httpServer.token, '')
+  // token 为空是合法状态：不产生任何错误
+  assert.deepEqual(resolve({ httpServer: { token: '' } }).errors, [])
+})
+
+test('resolveConfig prompt.system 默认为空串（= 用内置默认）', () => {
+  const { config } = resolve()
+  assert.equal(config.prompt.system, '')
+})
+
+test('resolveConfig prompt.system 字符串化并 trim', () => {
+  assert.equal(resolve({ prompt: { system: '  自定义提示词  ' } }).config.prompt.system, '自定义提示词')
+  assert.equal(resolve({ prompt: { system: 123 } }).config.prompt.system, '123')
+  assert.equal(resolve({ prompt: { system: null } }).config.prompt.system, '')
+})
+
+test('resolveConfig prompt.system 超过 20000 字符截断并报错', () => {
+  const long = 'x'.repeat(20001)
+  const { config, errors } = resolve({ prompt: { system: long } })
+  assert.equal(config.prompt.system.length, 20000)
+  assert.ok(errors.includes('prompt.system 超过 20000 字符'))
+
+  const ok = resolve({ prompt: { system: 'y'.repeat(20000) } })
+  assert.equal(ok.config.prompt.system.length, 20000)
+  assert.deepEqual(ok.errors, [])
+})
+
+test('resolveConfig summary.aiDetail 默认 false，只认严格 true', () => {
+  assert.equal(resolve().config.summary.aiDetail, false)
+  assert.equal(resolve({ summary: { aiDetail: true } }).config.summary.aiDetail, true)
+  assert.equal(resolve({ summary: { aiDetail: 'true' } }).config.summary.aiDetail, false)
+  assert.equal(resolve({ summary: { aiDetail: 1 } }).config.summary.aiDetail, false)
+})
+
+test('EDITABLE_FIELDS 收录 httpServer.* 与 summary.aiDetail，但不含 prompt.system', () => {
+  const paths = EDITABLE_FIELDS.map(([path]) => path)
+  for (const path of [
+    'httpServer.enabled',
+    'httpServer.port',
+    'httpServer.host',
+    'httpServer.authEnabled',
+    'httpServer.sessionHours',
+    'summary.aiDetail',
+  ]) {
+    assert.ok(paths.includes(path), path + ' 必须在可编辑白名单里')
+  }
+  // prompt.system 走单独端点，避免通用保存流程误清空
+  assert.ok(!paths.includes('prompt.system'))
+  assert.ok(!paths.includes('httpServer.token'))
+})
+
+test('sanitizeOverride 保留 httpServer 字段并丢弃 token / prompt.system', () => {
+  const got = sanitizeOverride({
+    httpServer: { enabled: true, port: 1213, host: ' 0.0.0.0 ', authEnabled: 'true', sessionHours: 24, token: 'secret' },
+    prompt: { system: '自定义' },
+    summary: { aiDetail: true },
+  })
+  assert.deepEqual(got.override.httpServer, {
+    enabled: true,
+    port: 1213,
+    host: '0.0.0.0',
+    authEnabled: true,
+    sessionHours: 24,
+  })
+  assert.equal(got.override.summary.aiDetail, true)
+  assert.equal(got.override.prompt, undefined)
+  assert.ok(got.dropped.includes('httpServer.token'))
+  assert.ok(got.dropped.includes('prompt.system'))
 })

@@ -25,7 +25,7 @@ window.__ModuleLoader__.load({
     const SLOT_SIDEBAR_FOOTER = 'sidebar.footer.action'
     const API = '/api/qq-digest'
     // 与 index.js 的 BACKEND_VERSION 保持一致：不一致说明后端仍是旧代码，需要重启一次 DSH。
-    const EXPECTED_BACKEND_VERSION = 3
+    const EXPECTED_BACKEND_VERSION = 4
 
     /** 样式必须带 data-plugin 归属标记，否则 DSH 的 claimStyles 会算到别的插件头上。 */
     function injectStyles() {
@@ -80,6 +80,12 @@ window.__ModuleLoader__.load({
         '.qqd-chip-progress { font-variant-numeric: tabular-nums; opacity: .9; }',
         '.qqd-panel { height: 100%; overflow: auto; padding: 18px 22px 28px; box-sizing: border-box; }',
         '.qqd-sidenav-icon { display: block; }',
+        '.qqd-textarea { width: 100%; min-height: 320px; padding: 10px; box-sizing: border-box; border-radius: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.65; color: inherit; background: rgba(127,127,127,0.06); border: 1px solid rgba(127,127,127,0.28); resize: vertical; }',
+        '.qqd-textarea:focus { outline: none; border-color: rgba(127,127,127,0.55); }',
+        '.qqd-mono { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }',
+        '.qqd-token { flex: 1 1 220px; min-width: 160px; height: 32px; padding: 0 9px; box-sizing: border-box; border-radius: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: inherit; background: rgba(127,127,127,0.06); border: 1px solid rgba(127,127,127,0.2); }',
+        '.qqd-counter { font-size: 11.5px; opacity: .6; font-variant-numeric: tabular-nums; }',
+        '.qqd-counter[data-kind="over"] { color: #c62828; opacity: 1; }',
       ].join('\n')
       document.head.appendChild(style)
     }
@@ -428,6 +434,14 @@ window.__ModuleLoader__.load({
       const [dirty, setDirty] = useState(false)
       const [recent, setRecent] = useState([])
       const [live, setLive] = useState(null)
+      // 提示词与网页服务的密钥不随 form 走：prompt.system 不在 settings 白名单里，
+      // token 也绝不能出现在普通保存请求里。
+      const [promptSystem, setPromptSystem] = useState('')
+      const [promptBaseline, setPromptBaseline] = useState('')
+      const [promptMeta, setPromptMeta] = useState({ defaultPrompt: '', maxChars: 20000, minChars: 10 })
+      const [showDefault, setShowDefault] = useState(false)
+      const [http, setHttp] = useState(null)
+      const [plainToken, setPlainToken] = useState('')
       // 卡片折叠状态：只有「运行状态」「最近一次报告」默认展开。
       const [openCards, setOpenCards] = useState({ status: false, recent: true })
       const aliveRef = useRef(true)
@@ -464,6 +478,35 @@ window.__ModuleLoader__.load({
         })
       }, [baseline])
 
+      const loadPrompt = useCallback(async function () {
+        try {
+          const d = await api('/prompt')
+          if (!aliveRef.current) return
+          const system = typeof d.system === 'string' ? d.system : ''
+          setPromptSystem(system)
+          setPromptBaseline(system)
+          setPromptMeta({
+            defaultPrompt: typeof d.defaultPrompt === 'string' ? d.defaultPrompt : '',
+            maxChars: Number(d.maxChars) || 20000,
+            minChars: Number(d.minChars) || 10,
+          })
+        } catch (e) {
+          // 后端还是旧代码（没有 /prompt）时静默降级：卡片会显示提示，不影响其它设置。
+          if (aliveRef.current) setPromptMeta(function (prev) { return Object.assign({}, prev, { error: e.message || String(e) }) })
+        }
+      }, [])
+
+      const loadHttp = useCallback(async function () {
+        try {
+          const d = await api('/http')
+          if (!aliveRef.current) return
+          setHttp(d)
+          setPlainToken('')
+        } catch (e) {
+          if (aliveRef.current) setHttp({ ok: false, error: e.message || String(e) })
+        }
+      }, [])
+
       const loadAll = useCallback(async function () {
         try {
           const data = await api('/settings')
@@ -478,6 +521,8 @@ window.__ModuleLoader__.load({
           api('/friends').then(function (d) { if (aliveRef.current) setFriends(d) }).catch(function () {})
           api('/recent').then(function (d) { if (aliveRef.current) setRecent(d.recent || []) }).catch(function () {})
           api('/status').then(function (d) { if (aliveRef.current) setLive(d) }).catch(function () {})
+          loadPrompt()
+          loadHttp()
         } catch (error) {
           if (aliveRef.current) flash(error.message || String(error), 'error')
         } finally {
@@ -537,6 +582,11 @@ window.__ModuleLoader__.load({
         if (!form) return
         setSaving(true)
         try {
+          // 提示词走专用端点（prompt.system 不在 settings 白名单里）。
+          // 它必须先成功：失败就直接中止，绝不报「已保存」这种假成功。
+          if (promptSystem !== promptBaseline) {
+            await postJson('/prompt', { system: promptSystem })
+          }
           const res = await postJson('/settings', { settings: form })
           const dropped = res.droppedFields || []
           if (dropped.length > 0) {
@@ -552,7 +602,7 @@ window.__ModuleLoader__.load({
         } finally {
           if (aliveRef.current) setSaving(false)
         }
-      }, [form, flash, loadAll, refreshStatus])
+      }, [form, promptSystem, promptBaseline, flash, loadAll, refreshStatus])
 
       const reset = useCallback(async function () {
         if (!window.confirm('清空设置页保存的所有覆盖，回到 cordis.patch.yml 里的初始值？')) return
@@ -610,6 +660,41 @@ window.__ModuleLoader__.load({
           } else {
             flash('测试消息已发送给：' + okList.join('，'))
           }
+        } catch (error) {
+          flash(error.message || String(error), 'error')
+        } finally {
+          if (aliveRef.current) setBusy('')
+        }
+      }, [flash])
+
+      const promptDirty = promptSystem !== promptBaseline
+      const anyDirty = dirty || promptDirty
+
+      /** 恢复默认提示词：二次确认后调 /prompt/reset。 */
+      const resetPrompt = useCallback(async function () {
+        if (!window.confirm('恢复为内置默认提示词？当前自定义内容会被清空。')) return
+        setBusy('prompt')
+        try {
+          const d = await postJson('/prompt/reset', {})
+          flash('已恢复内置默认提示词')
+          await loadPrompt()
+          if (d && d.system) setPromptSystem(d.system)
+        } catch (error) {
+          flash(error.message || String(error), 'error')
+        } finally {
+          if (aliveRef.current) setBusy('')
+        }
+      }, [flash, loadPrompt])
+
+      /** 重新生成网页服务密钥：明文只回这一次，提示用户立刻保存。 */
+      const regenToken = useCallback(async function () {
+        if (!window.confirm('重新生成网页服务的访问密钥？旧密钥立即失效，已登录的浏览器需要重新登录。')) return
+        setBusy('token')
+        try {
+          const d = await postJson('/http/token', {})
+          setPlainToken(d.token || '')
+          setHttp(d)
+          flash('已生成新密钥，请立即复制保存（离开本页后不再显示）')
         } catch (error) {
           flash(error.message || String(error), 'error')
         } finally {
@@ -835,6 +920,127 @@ window.__ModuleLoader__.load({
         ),
 
         h(Card, {
+          title: 'AI 提示词',
+          badges: promptDirty
+            ? h('span', { className: 'qqd-badge', 'data-kind': 'warn' }, '未保存')
+            : (promptSystem && promptSystem !== promptMeta.defaultPrompt
+                ? h('span', { className: 'qqd-badge', 'data-kind': 'ok' }, '自定义')
+                : h('span', { className: 'qqd-badge' }, '内置默认')),
+          open: Boolean(openCards.prompt),
+          onToggle: function () { toggleCard('prompt') },
+        },
+          h('div', { className: 'qqd-hint' }, '送给模型的 system prompt。留空即使用内置默认；修改后保存会热重建运行态，不需要重启 DSH。'),
+          promptMeta.error
+            ? h('div', { className: 'qqd-tip', 'data-kind': 'error' }, '提示词接口不可用（后端仍是旧代码）：' + promptMeta.error)
+            : null,
+          h('textarea', {
+            className: 'qqd-textarea',
+            value: promptSystem,
+            spellCheck: false,
+            placeholder: '留空 = 使用内置默认提示词。点下方「查看默认提示词」可参照默认内容改写。',
+            onChange: function (e) { setPromptSystem(e.target.value) },
+          }),
+          h('div', { className: 'qqd-inline' },
+            h('span', {
+              className: 'qqd-counter',
+              'data-kind': promptSystem.length > (promptMeta.maxChars || 20000) ? 'over' : 'ok',
+            }, promptSystem.length + ' / ' + (promptMeta.maxChars || 20000)),
+            h('span', { className: 'qqd-grow' }),
+            h('button', {
+              className: 'qqd-btn', type: 'button',
+              onClick: function () { setShowDefault(function (v) { return !v }) },
+            }, showDefault ? '收起默认提示词' : '查看默认提示词'),
+            h('button', {
+              className: 'qqd-btn', type: 'button', 'data-variant': 'danger',
+              disabled: saving || busy === 'prompt',
+              onClick: resetPrompt,
+            }, busy === 'prompt' ? '恢复中…' : '恢复默认'),
+          ),
+          showDefault
+            ? h('div', { className: 'qqd-pre' }, promptMeta.defaultPrompt || '（未取到默认提示词）')
+            : null,
+          promptSystem.length > 0 && promptSystem.length < (promptMeta.minChars || 10)
+            ? h('div', { className: 'qqd-tip', 'data-kind': 'error' },
+                '提示词太短：至少 ' + (promptMeta.minChars || 10) + ' 字符，留空则表示恢复默认。')
+            : null,
+        ),
+
+        h(Card, {
+          title: 'HTTP 网页服务',
+          badges: h('span', { className: 'qqd-inline' },
+            h('span', { className: 'qqd-badge', 'data-kind': form.httpServer && form.httpServer.enabled ? 'ok' : 'off' },
+              form.httpServer && form.httpServer.enabled ? '已开启' : '未开启'),
+            http && http.listening
+              ? h('span', { className: 'qqd-badge', 'data-kind': 'ok' }, '已监听')
+              : (http && http.error ? h('span', { className: 'qqd-badge', 'data-kind': 'warn' }, '启动失败') : null),
+          ),
+          open: Boolean(openCards.http),
+          onToggle: function () { toggleCard('http') },
+        },
+          h('div', { className: 'qqd-hint' }, '插件自带的独立网页服务（配置页 / 日志页 / 总结记录页），与 DSH 自带的 webServer 完全独立。默认关闭。'),
+          h(Field, { label: '开启网页服务', hint: '开启后按下面的端口与监听地址对外提供页面。' },
+            h(Check, {
+              checked: Boolean(form.httpServer && form.httpServer.enabled),
+              label: '启用独立 HTTP 网页服务',
+              onChange: function (v) { patch('httpServer.enabled', v) },
+            }),
+          ),
+          h(Field, { label: '端口', hint: '1024–65535，默认 1213。保存时会先探测端口是否被占用。' },
+            h(NumInput, {
+              value: form.httpServer && form.httpServer.port, min: 1024, max: 65535,
+              onChange: function (v) { patch('httpServer.port', v) },
+            }),
+          ),
+          h(Field, { label: '监听地址', hint: '0.0.0.0 = 局域网内其它设备也能访问，请确保密钥足够复杂；只给本机用可填 127.0.0.1。' },
+            h(TextInput, {
+              value: form.httpServer && form.httpServer.host,
+              placeholder: '0.0.0.0',
+              onChange: function (v) { patch('httpServer.host', v) },
+            }),
+          ),
+          h(Field, { label: '密钥验证', hint: '开启后访问网页需要输入密钥登录；关闭则任何能连上该端口的人都能看。' },
+            h(Check, {
+              checked: form.httpServer ? form.httpServer.authEnabled !== false : true,
+              label: '访问网页需要密钥',
+              onChange: function (v) { patch('httpServer.authEnabled', v) },
+            }),
+          ),
+          h(Field, { label: '访问密钥', hint: '密钥不在普通保存里传输。点「重新生成」后新密钥只显示一次，请立刻复制保存。' },
+            h('div', { className: 'qqd-inline' },
+              h('input', {
+                className: 'qqd-token',
+                value: plainToken || (http && http.tokenMasked ? http.tokenMasked : ''),
+                readOnly: true,
+                placeholder: http && http.tokenSet ? '' : '尚未生成',
+                onFocus: function (e) { e.target.select() },
+              }),
+              h('button', {
+                className: 'qqd-btn', type: 'button', disabled: busy === 'token',
+                onClick: regenToken,
+              }, busy === 'token' ? '生成中…' : '重新生成'),
+            ),
+          ),
+          h(Field, { label: '登录有效期（小时）', hint: '登录后保持多久不用重新输入密钥。默认 168（7 天）。' },
+            h(NumInput, {
+              value: form.httpServer && form.httpServer.sessionHours, min: 1, max: 8760,
+              onChange: function (v) { patch('httpServer.sessionHours', v) },
+            }),
+          ),
+          h(Field, { label: '运行状态' },
+            h('div', { className: 'qqd-inline' },
+              h('span', { className: 'qqd-badge', 'data-kind': http && http.listening ? 'ok' : 'off' },
+                http && http.listening
+                  ? '已监听 http://' + (http.host === '0.0.0.0' ? '127.0.0.1' : http.host) + ':' + http.port
+                  : (http && http.error ? '启动失败：' + http.error : '未监听')),
+            ),
+          ),
+          h('div', { className: 'qqd-note' }, '改动端口或监听地址后，保存会重启 HTTP 服务，已登录的会话可能失效。'),
+          h('div', { className: 'qqd-actions' },
+            h('button', { className: 'qqd-btn', type: 'button', onClick: loadHttp }, '刷新状态'),
+          ),
+        ),
+
+        h(Card, {
           title: '投递目标（QQ 私聊）',
           badges: h('span', { className: 'qqd-badge' }, form.dryRun ? '当前预演，不会真发' : '必填'),
           open: Boolean(openCards.delivery),
@@ -854,7 +1060,7 @@ window.__ModuleLoader__.load({
           h(Field, { label: '单条消息最大字数', hint: '超过则按行切分成多条发送。默认 1800。' },
             h(NumInput, { value: form.delivery && form.delivery.maxCharsPerMessage, min: 200, max: 4000, step: 100, onChange: function (v) { patch('delivery.maxCharsPerMessage', v) } }),
           ),
-          h(Field, { label: '多群合并窗口（毫秒）', hint: '多个群在此时间窗内各自出总结时，合并成一条报告再发。0 = 不合并。' },
+          h(Field, { label: '多群聚合窗口（毫秒）', hint: '多个群在此时间窗内各自出总结时，会一起投递，但**每个群仍单独发一条消息**，不会合并成一条（避免超长截断）。0 = 立即逐个发送。' },
             h(NumInput, { value: form.delivery && form.delivery.aggregateWindowMs, min: 0, max: 600000, step: 500, onChange: function (v) { patch('delivery.aggregateWindowMs', v) } }),
           ),
         ),
@@ -880,13 +1086,14 @@ window.__ModuleLoader__.load({
         h('div', { className: 'qqd-actions' },
           h('button', {
             className: 'qqd-btn', type: 'button', 'data-variant': 'primary',
-            disabled: saving || !dirty, onClick: save,
-          }, saving ? '保存中…' : (dirty ? '保存并生效' : '已保存')),
+            disabled: saving || !anyDirty, onClick: save,
+          }, saving ? '保存中…' : (anyDirty ? '保存并生效' : '已保存')),
           h('button', {
-            className: 'qqd-btn', type: 'button', disabled: saving || !dirty,
+            className: 'qqd-btn', type: 'button', disabled: saving || !anyDirty,
             onClick: function () {
               setForm(JSON.parse(baseline))
               setDirty(false)
+              setPromptSystem(promptBaseline)
               flash('已撤销未保存的改动')
             },
           }, '撤销改动'),
@@ -895,7 +1102,18 @@ window.__ModuleLoader__.load({
 
         recent.length > 0
           ? h(Card, { title: '最近一次报告', open: true },
-              h('div', { className: 'qqd-pre' }, recent[0].text || ''),
+              (recent[0].reports && recent[0].reports.length > 0)
+                ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+                    recent[0].reports.map(function (rep, i) {
+                      return h('div', { key: String(rep.groupId) + ':' + i, style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                        h('div', { className: 'qqd-note', style: { fontWeight: 600 } },
+                          (rep.groupName || rep.groupId) + '　' + (rep.count || 0) + ' 条' + (rep.ok ? '' : '（总结失败，降级摘录）'),
+                        ),
+                        h('div', { className: 'qqd-pre' }, rep.text || ''),
+                      )
+                    }),
+                  )
+                : h('div', { className: 'qqd-pre' }, recent[0].text || ''),
             )
           : null,
       )

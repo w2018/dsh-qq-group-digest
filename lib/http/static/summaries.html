@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>总结记录 · QQ 群总结</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div class="qd-topbar">
+  <div class="qd-brand"><span class="qd-logo">QQ</span><span>QQ 群总结</span></div>
+  <nav class="qd-nav">
+    <a href="/">配置</a>
+    <a href="/logs">日志</a>
+    <a href="/summaries" class="active">总结记录</a>
+  </nav>
+  <div class="qd-topbar-right">
+    <button class="qd-btn ghost sm" id="btn-logout" type="button">退出登录</button>
+  </div>
+</div>
+
+<main class="qd-main qd-main-wide">
+  <div class="qd-page-head">
+    <h1 class="qd-page-title">总结记录</h1>
+    <p class="qd-page-sub" id="sum-sub">正在加载…</p>
+    <span class="qd-grow"></span>
+    <span class="qd-badge" id="sum-mode" title="由配置页的「AI 精细总结」开关决定">—</span>
+  </div>
+
+  <div class="qd-sumlayout">
+    <aside class="qd-sumside">
+      <div class="qd-sumfilters">
+        <select class="qd-select" id="f-group">
+          <option value="">全部群</option>
+        </select>
+        <input class="qd-input" id="f-keyword" placeholder="搜索总结正文…">
+      </div>
+      <div class="qd-sumlist" id="sum-list"></div>
+      <div class="qd-sumsidfoot">
+        <button class="qd-btn ghost sm" type="button" id="btn-more" style="display:none">加载更多</button>
+      </div>
+    </aside>
+
+    <section class="qd-sumpanel">
+      <div class="qd-sumpanelhead" id="sum-head" style="display:none">
+        <button class="qd-btn ghost sm qd-back" type="button" id="btn-back" title="返回列表">← 列表</button>
+        <div class="qd-sumpaneltitle">
+          <strong id="sum-title"></strong>
+          <span class="qd-hint" id="sum-meta"></span>
+        </div>
+        <div class="qd-inline">
+          <button class="qd-btn ghost sm" type="button" id="btn-prev" title="上一条（↑ / k）">↑ 上一条</button>
+          <button class="qd-btn ghost sm" type="button" id="btn-next" title="下一条（↓ / j）">↓ 下一条</button>
+          <button class="qd-btn ghost sm" type="button" id="btn-copy">复制</button>
+          <button class="qd-btn ghost sm" type="button" id="btn-download">下载 .md</button>
+          <button class="qd-btn ghost sm" type="button" id="btn-raw">原始文本</button>
+        </div>
+      </div>
+      <div class="qd-sumview" id="sum-view"></div>
+      <div class="qd-sumraw" id="sum-raw" style="display:none"></div>
+    </section>
+  </div>
+</main>
+
+<div class="qd-toasts" id="toasts"></div>
+
+<script src="/md.js"></script>
+<script>
+(function () {
+  'use strict'
+
+  var PAGE_SIZE = 30
+
+  var state = {
+    items: [],
+    total: 0,
+    offset: 0,
+    hasMore: false,
+    loading: false,
+    current: null,
+    currentDetail: null,
+    rawMode: false,
+    aiDetail: null,
+    filter: { groupId: '', keyword: '' },
+  }
+
+  function $(sel) { return document.querySelector(sel) }
+  function el(tag, cls, text) {
+    var node = document.createElement(tag)
+    if (cls) node.className = cls
+    if (text != null) node.textContent = text
+    return node
+  }
+
+  async function api(path, options) {
+    var res = await fetch(path, options || {})
+    if (res.status === 401) {
+      location.replace('/login')
+      throw new Error('未登录')
+    }
+    var data = null
+    try { data = await res.json() } catch (e) { data = null }
+    if (!res.ok || (data && data.ok === false)) {
+      throw new Error((data && data.error) || ('请求失败（HTTP ' + res.status + '）'))
+    }
+    return data || {}
+  }
+
+  function toast(text, kind) {
+    var box = $('#toasts')
+    var node = el('div', 'qd-toast ' + (kind || ''), text)
+    box.appendChild(node)
+    setTimeout(function () {
+      node.style.opacity = '0'
+      setTimeout(function () { node.remove() }, 200)
+    }, kind === 'err' ? 5200 : 2600)
+  }
+
+  function pad2(n) { return n < 10 ? '0' + n : String(n) }
+
+  function dayTime(ms) {
+    var d = new Date(Number(ms) || 0)
+    if (isNaN(d.getTime())) return ''
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+      ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes())
+  }
+
+  /** 群标题统一用「群名（群号）」；群名为空时退回群号。 */
+  function groupLabel(groupName, groupId) {
+    var name = String(groupName || '').trim()
+    var id = String(groupId || '').trim()
+    if (name && id) return name + '（' + id + '）'
+    return name || id || '未知群'
+  }
+
+  function renderState(target, kind, text) {
+    target.textContent = ''
+    var box = el('div', 'qd-state' + (kind === 'err' ? ' err' : ''))
+    if (kind === 'loading') box.appendChild(el('div', 'qd-spinner'))
+    box.appendChild(el('div', null, text))
+    target.appendChild(box)
+  }
+
+  // ── 当前是哪种总结（读配置里的 summary.aiDetail） ──────────
+
+  async function loadMode() {
+    var badge = $('#sum-mode')
+    try {
+      var data = await api('/api/settings')
+      var settings = data.settings || {}
+      var ai = !!(settings.summary && settings.summary.aiDetail)
+      state.aiDetail = ai
+      badge.textContent = ai ? 'AI 精细总结' : '本地渲染总结'
+      badge.className = 'qd-badge ' + (ai ? 'accent' : '')
+      badge.title = ai
+        ? '配置页「AI 精细总结」已打开：Markdown 由模型直接撰写。'
+        : '配置页「AI 精细总结」已关闭：Markdown 由本地模板渲染，正文来自模型总结。'
+    } catch (error) {
+      state.aiDetail = null
+      badge.textContent = '模式未知'
+      badge.className = 'qd-badge warn'
+      badge.title = '读取配置失败：' + error.message
+    }
+  }
+
+  // ── 列表：按群分组，每组下挂该群的记录 ───────────────────
+
+  function renderList() {
+    var list = $('#sum-list')
+    list.textContent = ''
+    if (state.items.length === 0) {
+      renderState(list, 'empty', state.filter.groupId || state.filter.keyword
+        ? '没有匹配的总结记录。换个关键词，或者清空筛选。'
+        : '还没有总结记录。群里消息达到阈值、或者点「立即总结」之后，每个群的结果会分别出现在这里。')
+      $('#btn-more').style.display = 'none'
+      return
+    }
+
+    // items 已按时间倒序；这里再按群聚拢，保持「最近有动静的群」排前面。
+    var order = []
+    var buckets = {}
+    state.items.forEach(function (item) {
+      var gid = String(item.groupId || '')
+      if (!buckets[gid]) {
+        buckets[gid] = { groupId: gid, groupName: item.groupName || '', items: [] }
+        order.push(gid)
+      }
+      if (!buckets[gid].groupName && item.groupName) buckets[gid].groupName = item.groupName
+      buckets[gid].items.push(item)
+    })
+
+    var frag = document.createDocumentFragment()
+    order.forEach(function (gid) {
+      var bucket = buckets[gid]
+      var head = el('div', 'qd-sumgroup')
+      head.appendChild(el('span', 'qd-sumgroup-name', groupLabel(bucket.groupName, bucket.groupId)))
+      head.appendChild(el('span', 'qd-hint', bucket.items.length + ' 条'))
+      frag.appendChild(head)
+
+      bucket.items.forEach(function (item) {
+        var row = el('button', 'qd-sumitem')
+        row.type = 'button'
+        row.dataset.groupId = item.groupId
+        row.dataset.batchId = item.batchId
+        if (state.current && state.current.groupId === item.groupId && state.current.batchId === item.batchId) {
+          row.classList.add('active')
+        }
+        var top = el('span', 'qd-sumitem-top')
+        top.appendChild(el('span', 'qd-sumitem-time', dayTime(item.at)))
+        row.appendChild(top)
+        var meta = el('span', 'qd-sumitem-meta')
+        meta.appendChild(el('span', 'qd-badge ' + (item.ok ? 'ok' : 'err'), item.ok ? '成功' : '失败'))
+        meta.appendChild(el('span', 'qd-hint', item.count + ' 条'))
+        if (item.model) meta.appendChild(el('span', 'qd-hint', item.model))
+        if (item.failed) meta.appendChild(el('span', 'qd-badge warn', '失败 ' + item.failed))
+        row.appendChild(meta)
+        row.appendChild(el('span', 'qd-sumitem-preview', item.preview || '（无预览）'))
+        row.addEventListener('click', function () {
+          select(item.groupId, item.batchId)
+        })
+        frag.appendChild(row)
+      })
+    })
+    list.appendChild(frag)
+    $('#btn-more').style.display = state.hasMore ? 'inline-flex' : 'none'
+  }
+
+  function markActive() {
+    var nodes = document.querySelectorAll('.qd-sumitem')
+    for (var i = 0; i < nodes.length; i += 1) {
+      var node = nodes[i]
+      var on = state.current &&
+        node.dataset.groupId === state.current.groupId &&
+        node.dataset.batchId === state.current.batchId
+      node.classList.toggle('active', !!on)
+    }
+  }
+
+  async function loadList(reset) {
+    if (state.loading) return
+    state.loading = true
+    if (reset) {
+      state.items = []
+      state.offset = 0
+      renderState($('#sum-list'), 'loading', '正在加载总结记录…')
+    } else {
+      $('#btn-more').disabled = true
+    }
+    try {
+      var params = new URLSearchParams()
+      if (state.filter.groupId) params.set('groupId', state.filter.groupId)
+      if (state.filter.keyword) params.set('keyword', state.filter.keyword)
+      params.set('limit', String(PAGE_SIZE))
+      params.set('offset', String(state.offset))
+      var data = await api('/api/summaries?' + params.toString())
+      var batch = data.items || []
+      state.total = Number(data.total || 0)
+      if (reset) state.items = batch
+      else state.items = state.items.concat(batch)
+      state.offset += batch.length
+      state.hasMore = state.offset < state.total && batch.length >= PAGE_SIZE
+      fillGroups(data.groups || [])
+      renderList()
+      $('#sum-sub').textContent = state.total > 0
+        ? '共 ' + state.total + ' 条记录，已加载 ' + state.items.length + ' 条 · 每个群各自成篇'
+        : '暂无记录'
+      // 宽屏才自动选中第一条；窄屏是列表/预览二选一，自动跳过去会让人找不到列表。
+      if (reset && state.items.length > 0 && !state.current && isWide()) {
+        select(state.items[0].groupId, state.items[0].batchId)
+      }
+    } catch (error) {
+      renderState($('#sum-list'), 'err', '加载失败：' + error.message)
+      toast('加载总结记录失败：' + error.message, 'err')
+    } finally {
+      state.loading = false
+      $('#btn-more').disabled = false
+    }
+  }
+
+  function fillGroups(groups) {
+    var select = $('#f-group')
+    var keep = select.value
+    var seen = {}
+    var options = []
+    groups.forEach(function (gid) {
+      var id = String(gid || '')
+      if (!id || seen[id]) return
+      seen[id] = true
+      // 群名从已加载的记录里捞，捞不到就只显示群号
+      var name = ''
+      for (var i = 0; i < state.items.length; i += 1) {
+        if (String(state.items[i].groupId) === id && state.items[i].groupName) {
+          name = state.items[i].groupName
+          break
+        }
+      }
+      options.push({ value: id, label: name ? name + '（' + id + '）' : id })
+    })
+    if (keep && !seen[keep]) options.unshift({ value: keep, label: keep })
+    select.textContent = ''
+    var all = el('option', null, '全部群')
+    all.value = ''
+    select.appendChild(all)
+    options.forEach(function (opt) {
+      var node = el('option', null, opt.label)
+      node.value = opt.value
+      select.appendChild(node)
+    })
+    select.value = keep || ''
+  }
+
+  // ── 详情：只渲染这一个群、这一批 ──────────────────────────
+
+  function indexOfCurrent() {
+    if (!state.current) return -1
+    for (var i = 0; i < state.items.length; i += 1) {
+      var item = state.items[i]
+      if (item.groupId === state.current.groupId && item.batchId === state.current.batchId) return i
+    }
+    return -1
+  }
+
+  /** 宽屏（>= 900px）才同时显示列表与预览。 */
+  function isWide() {
+    if (typeof window.matchMedia === 'function') {
+      return !window.matchMedia('(max-width: 900px)').matches
+    }
+    return true
+  }
+
+  /** 窄屏时把布局切到「只看预览」，返回按钮切回列表。 */
+  function setDetailVisible(on) {
+    var layout = document.querySelector('.qd-sumlayout')
+    if (!layout || !layout.classList) return
+    if (on) layout.classList.add('showing-detail')
+    else layout.classList.remove('showing-detail')
+  }
+
+  async function select(groupId, batchId) {
+    state.current = { groupId: groupId, batchId: batchId }
+    markActive()
+    setDetailVisible(true)
+    $('#sum-head').style.display = 'flex'
+    $('#sum-title').textContent = '正在加载…'
+    $('#sum-meta').textContent = ''
+    renderState($('#sum-view'), 'loading', '正在加载这一条总结…')
+    $('#sum-raw').style.display = 'none'
+    $('#sum-view').style.display = ''
+    state.rawMode = false
+    $('#btn-raw').textContent = '原始文本'
+    try {
+      var data = await api('/api/summaries/' + encodeURIComponent(groupId) + '/' + encodeURIComponent(batchId))
+      var item = data.item || {}
+      state.currentDetail = item
+      var md = String(item.md || '')
+      $('#sum-title').textContent = groupLabel(item.groupName, item.groupId) + ' · ' + dayTime(item.at)
+      var metaParts = []
+      if (item.count != null) metaParts.push(item.count + ' 条消息')
+      if (item.batchId) metaParts.push('批次 ' + item.batchId)
+      if (item.model) metaParts.push(item.model)
+      if (item.aiDetail === true) metaParts.push('AI 精细总结')
+      if (item.delivered != null) metaParts.push('已送达 ' + item.delivered)
+      if (item.failed) metaParts.push('失败 ' + item.failed)
+      if (item.ok === false) metaParts.push('这一批总结失败')
+      $('#sum-meta').textContent = metaParts.join(' · ')
+      renderMarkdownInto($('#sum-view'), md)
+      $('#sum-raw').textContent = md
+      updateNavButtons()
+    } catch (error) {
+      renderState($('#sum-view'), 'err', '加载失败：' + error.message)
+      toast('加载总结失败：' + error.message, 'err')
+    }
+  }
+
+  /** 优先用 md.js，缺失时退回转义后的纯文本。 */
+  function renderMarkdownInto(target, md) {
+    target.textContent = ''
+    var body = el('div', 'qd-md')
+    if (typeof window.renderMarkdown === 'function') {
+      try {
+        body.innerHTML = window.renderMarkdown(md)
+      } catch (error) {
+        body.textContent = md
+      }
+    } else {
+      body.textContent = md
+    }
+    target.appendChild(body)
+    var links = body.querySelectorAll('a')
+    for (var i = 0; i < links.length; i += 1) {
+      links[i].target = '_blank'
+      links[i].rel = 'noopener noreferrer'
+    }
+  }
+
+  function updateNavButtons() {
+    var index = indexOfCurrent()
+    $('#btn-prev').disabled = index <= 0
+    $('#btn-next').disabled = index < 0 || index >= state.items.length - 1
+  }
+
+  function step(delta) {
+    var index = indexOfCurrent()
+    if (index < 0) return
+    var next = index + delta
+    if (next < 0 || next >= state.items.length) return
+    var item = state.items[next]
+    select(item.groupId, item.batchId)
+  }
+
+  // ── 复制 / 下载 / 原始 ────────────────────────────────────
+
+  async function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+    // 非安全上下文（比如用局域网 IP 打开）没有 clipboard API，退回 execCommand。
+    var area = document.createElement('textarea')
+    area.value = text
+    area.style.position = 'fixed'
+    area.style.opacity = '0'
+    document.body.appendChild(area)
+    area.select()
+    var ok = false
+    try { ok = document.execCommand('copy') } catch (e) { ok = false }
+    area.remove()
+    return ok
+  }
+
+  $('#btn-copy').addEventListener('click', async function () {
+    var md = state.currentDetail && state.currentDetail.md
+    if (!md) {
+      toast('还没有可复制的内容')
+      return
+    }
+    try {
+      var ok = await copyText(String(md))
+      toast(ok ? '已复制 Markdown 原文' : '复制失败，请手动选中复制', ok ? 'ok' : 'err')
+    } catch (error) {
+      toast('复制失败：' + error.message, 'err')
+    }
+  })
+
+  $('#btn-download').addEventListener('click', function () {
+    var detail = state.currentDetail
+    if (!detail || !detail.md) {
+      toast('还没有可下载的内容')
+      return
+    }
+    var stamp = detail.at ? new Date(detail.at) : new Date()
+    var name = 'qq-digest-' + String(detail.groupId || 'group') + '-' +
+      stamp.getFullYear() + pad2(stamp.getMonth() + 1) + pad2(stamp.getDate()) + '-' +
+      pad2(stamp.getHours()) + pad2(stamp.getMinutes()) + '.md'
+    var blob = new Blob([String(detail.md)], { type: 'text/markdown;charset=utf-8' })
+    var url = URL.createObjectURL(blob)
+    var a = document.createElement('a')
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(function () { URL.revokeObjectURL(url) }, 4000)
+    toast('已下载 ' + name, 'ok')
+  })
+
+  $('#btn-raw').addEventListener('click', function () {
+    if (!state.currentDetail) return
+    state.rawMode = !state.rawMode
+    $('#sum-view').style.display = state.rawMode ? 'none' : ''
+    $('#sum-raw').style.display = state.rawMode ? '' : 'none'
+    this.textContent = state.rawMode ? '渲染视图' : '原始文本'
+  })
+
+  $('#btn-back').addEventListener('click', function () {
+    setDetailVisible(false)
+  })
+
+  $('#btn-prev').addEventListener('click', function () { step(-1) })
+  $('#btn-next').addEventListener('click', function () { step(1) })
+
+  // ── 筛选 ──────────────────────────────────────────────────
+
+  $('#f-group').addEventListener('change', function () {
+    state.filter.groupId = this.value
+    state.current = null
+    state.currentDetail = null
+    $('#sum-head').style.display = 'none'
+    loadList(true)
+  })
+
+  var kwTimer = null
+  $('#f-keyword').addEventListener('input', function () {
+    var value = String(this.value || '').trim()
+    if (kwTimer) clearTimeout(kwTimer)
+    kwTimer = setTimeout(function () {
+      state.filter.keyword = value
+      state.current = null
+      state.currentDetail = null
+      $('#sum-head').style.display = 'none'
+      loadList(true)
+    }, 300)
+  })
+
+  $('#btn-more').addEventListener('click', function () { loadList(false) })
+
+  $('#btn-logout').addEventListener('click', async function () {
+    try { await fetch('/api/logout', { method: 'POST' }) } catch (e) { /* 忽略 */ }
+    location.replace('/login')
+  })
+
+  // 窗口从窄变宽时，把「只看预览」的状态复位，免得列表永远藏着。
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('resize', function () {
+      if (isWide()) setDetailVisible(false)
+    })
+  }
+
+  // 键盘上下切换（不在输入框里时）
+  document.addEventListener('keydown', function (event) {
+    var tag = (event.target && event.target.tagName) || ''
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+    if (event.key === 'ArrowUp' || event.key === 'k') { step(-1); event.preventDefault() }
+    else if (event.key === 'ArrowDown' || event.key === 'j') { step(1); event.preventDefault() }
+  })
+
+  loadMode()
+  loadList(true)
+})()
+</script>
+</body>
+</html>
