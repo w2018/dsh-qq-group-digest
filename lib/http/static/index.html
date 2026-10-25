@@ -31,6 +31,7 @@
       <span class="qd-caret">▾</span>
       <h2 class="qd-card-title">运行状态</h2>
       <span class="qd-card-sum" data-sum></span>
+      <span class="qd-badge" id="ws-badge" hidden></span>
       <span class="qd-badge" id="status-badge">加载中</span>
     </header>
     <div class="qd-card-body">
@@ -309,8 +310,12 @@
       <span class="qd-badge" id="prompt-badge">默认</span>
     </header>
     <div class="qd-card-body">
+      <div class="qd-tabs" role="tablist" id="prompt-tabs">
+        <button class="qd-tab" type="button" role="tab" data-kind="summary" data-active="true" aria-selected="true">普通总结</button>
+        <button class="qd-tab" type="button" role="tab" data-kind="detail" data-active="false" aria-selected="false">AI 精细版</button>
+      </div>
       <div class="qd-row">
-        <div class="qd-label">系统提示词 <code>prompt.system</code></div>
+        <div class="qd-label">系统提示词 <code id="prompt-path">prompt.system</code></div>
         <div class="qd-control">
           <textarea class="qd-textarea mono" id="prompt-text" spellcheck="false" placeholder="留空 = 使用内置默认提示词"></textarea>
           <div class="qd-inline">
@@ -321,9 +326,13 @@
             <button class="qd-btn ghost sm" type="button" id="btn-prompt-reset">恢复默认</button>
             <button class="qd-btn primary sm" type="button" id="btn-prompt-save">保存提示词</button>
           </div>
-          <div class="qd-hint">
+          <div class="qd-hint" id="prompt-hint">
             这里改的是喂给模型的 system prompt，保存后下一批总结立刻生效，不需要重启。
             提示词独立于下面的「保存并生效」，有单独的保存按钮。
+          </div>
+          <div class="qd-hint">
+            两套提示词完全独立：<b>普通总结</b>用于阈值批次触发的常规总结，
+            <b>AI 精细版</b>用于「AI 精细版」重新整理历史总结。切换标签不会丢掉另一套未保存的草稿。
           </div>
         </div>
       </div>
@@ -347,7 +356,8 @@
           </div>
           <datalist id="friend-options"></datalist>
           <div class="qd-chips" id="friend-chips"></div>
-          <div class="qd-hint">总结会以私聊形式发给这些好友。dryRun 打开时只写 outbox 不真发。</div>
+          <div class="qd-hint" id="friend-warn" hidden>（未配置投递目标：总结只保存在网页端与历史记录，不会发 QQ）</div>
+          <div class="qd-hint">总结会以私聊形式发给这些好友。不配也能正常跑，只是不发 QQ。dryRun 打开时只写 outbox 不真发。</div>
         </div>
       </div>
       <div class="qd-row">
@@ -460,9 +470,37 @@
     members: [],
     memberGroup: '',
     models: { providers: [], current: null },
-    prompt: { system: '', isDefault: true, defaultPrompt: '', maxChars: 20000 },
-    promptDirty: false,
+    // 两套提示词各自一个槽位：普通总结（summary）/ AI 精细版（detail）。
+    // system 是 settings.json 里存的原样值（空串 = 用内置默认），
+    // baseline 是保存后的值，用来算「有没有未保存的改动」。
+    prompts: {
+      summary: emptyPromptSlot(),
+      detail: emptyPromptSlot(),
+    },
+    promptKind: 'summary',
     statusTimer: null,
+    wsTimer: null,
+    wsLink: null,
+  }
+
+  /** 一套提示词的槽位。 */
+  function emptyPromptSlot() {
+    return { system: '', baseline: '', isDefault: true, defaultPrompt: '', maxChars: 20000, minChars: 10, error: '' }
+  }
+
+  /** 当前 tab 对应的槽位。 */
+  function curPrompt() {
+    return state.prompts[state.promptKind] || emptyPromptSlot()
+  }
+
+  /** 某套提示词有没有未保存的改动。 */
+  function promptSlotDirty(kind) {
+    var slot = state.prompts[kind]
+    return Boolean(slot) && slot.system !== slot.baseline
+  }
+
+  function promptDirtyAny() {
+    return promptSlotDirty('summary') || promptSlotDirty('detail')
   }
 
   // ── 小工具 ────────────────────────────────────────────────
@@ -691,6 +729,9 @@
       },
     })
     refreshFriendPicker()
+    // E-4：没配接收人不是错误，只是一条提示——不报错、不阻塞保存。
+    var warn = $('#friend-warn')
+    if (warn) warn.hidden = friends().length > 0
   }
 
   /**
@@ -1003,6 +1044,57 @@
     badge.className = 'qd-badge' + (kind ? ' ' + kind : '')
   }
 
+  /**
+   * 协议端连接三态（F-3）：
+   *   已连接 → 绿色「已连接」
+   *   重连中 → 橙色「已断开，N 秒后重连（第 K 次）」，N 到 0 变「正在重连…」
+   *   未连接 → 灰色「未连接」
+   * 后端 5 秒才轮询一次，nextRetryAt 是固定时间点，这里本地每秒重算剩余秒数。
+   * 旧后端没有这些字段时回退成 connected 布尔值的两态。
+   */
+  function wsLinkView() {
+    var ws = state.wsLink || {}
+    var attempt = Math.max(0, Math.trunc(Number(ws.reconnectAttempt) || 0))
+    if (ws.connected === true) return { text: '已连接', kind: 'ok' }
+    if (ws.reconnecting === true) {
+      var left = Math.ceil(((Number(ws.nextRetryAt) || 0) - Date.now()) / 1000)
+      var suffix = attempt > 0 ? '（第 ' + attempt + ' 次）' : ''
+      if (left > 0) return { text: '已断开，' + left + ' 秒后重连' + suffix, kind: 'warn' }
+      return { text: '正在重连…' + suffix, kind: 'warn' }
+    }
+    return { text: '未连接', kind: '' }
+  }
+
+  /** 把连接态同时写进标题行的徽章与状态表里的「WS 连接」一项。 */
+  function applyWsLink() {
+    var view = wsLinkView()
+    var badge = $('#ws-badge')
+    if (badge) {
+      badge.hidden = false
+      badge.textContent = view.text
+      badge.className = 'qd-badge' + (view.kind ? ' ' + view.kind : '')
+    }
+    if (wsKvNode) {
+      wsKvNode.textContent = view.text
+      wsKvNode.style.color = view.kind ? 'var(--qd-' + view.kind + ')' : ''
+    }
+  }
+
+  /** 重连期间挂 1 秒定时器，让倒计时平滑递减；连上/未重连就停掉。 */
+  function syncWsTicker() {
+    var reconnecting = Boolean(state.wsLink && state.wsLink.reconnecting === true && state.wsLink.connected !== true)
+    if (reconnecting && !state.wsTimer) {
+      state.wsTimer = setInterval(applyWsLink, 1000)
+    } else if (!reconnecting && state.wsTimer) {
+      clearInterval(state.wsTimer)
+      state.wsTimer = null
+    }
+  }
+
+  // 「WS 连接」那一格是每次 refreshStatus 重建的，节点引用单独存一份，
+  // 免得每秒 tick 时再去查 DOM。
+  var wsKvNode = null
+
   function kvItem(key, value, kind) {
     var item = el('div', 'qd-kv-item')
     item.appendChild(el('div', 'qd-kv-key', key))
@@ -1024,7 +1116,13 @@
       var kv = $('#status-kv')
       kv.textContent = ''
       kv.appendChild(kvItem('插件状态', rt.started ? '已启动' : (rt.startError ? '启动失败' : '未启动'), rt.started ? 'ok' : 'warn'))
-      kv.appendChild(kvItem('WS 连接', rt.ws && rt.ws.connected ? '已连接' : '未连接', rt.ws && rt.ws.connected ? 'ok' : 'warn'))
+      // 连接态单独渲染：倒计时靠本地每秒 tick，不能只在 5 秒轮询时更新。
+      state.wsLink = rt.ws || null
+      var wsItem = kvItem('WS 连接', '', '')
+      wsKvNode = wsItem.querySelector('.qd-kv-val')
+      kv.appendChild(wsItem)
+      applyWsLink()
+      syncWsTicker()
       kv.appendChild(kvItem('累计重启', String(rt.restarts == null ? 0 : rt.restarts)))
       kv.appendChild(kvItem('HTTP 服务', http.listening ? ('监听中 · ' + http.port) : (http.enabled ? '未监听' : '未开启'), http.listening ? 'ok' : 'warn'))
       kv.appendChild(kvItem('日志条数', data.logs ? String(data.logs.total || 0) : '—'))
@@ -1132,65 +1230,119 @@
 
   // ── 提示词卡片 ────────────────────────────────────────────
 
+  function promptKindLabel(kind) {
+    return kind === 'detail' ? 'AI 精细版' : '普通总结'
+  }
+
+  /** 某套提示词的请求参数：summary 走默认路径，detail 带 ?kind=detail。 */
+  function promptQuery(kind) {
+    return kind === 'detail' ? '?kind=detail' : ''
+  }
+
+  /** 卡片标题右侧的一句话摘要（两套都写，一眼看清各自状态）。 */
+  function promptSumText(kind) {
+    var slot = state.prompts[kind] || emptyPromptSlot()
+    return slot.isDefault ? '默认' : '自定义 ' + slot.system.length + ' 字符'
+  }
+
+  /** 切 tab：只换展示，两套未保存的草稿各自留在自己的槽位里。 */
+  function setPromptKind(kind) {
+    state.promptKind = kind === 'detail' ? 'detail' : 'summary'
+    $('#prompt-text').value = curPrompt().system
+    updatePromptMeta()
+  }
+
   function updatePromptMeta() {
+    var kind = state.promptKind
+    var slot = curPrompt()
     var text = $('#prompt-text').value
-    var max = state.prompt.maxChars || 20000
+    var max = slot.maxChars || 20000
     $('#prompt-count').textContent = text.length + ' / ' + max
     $('#prompt-count').style.color = text.length > max ? 'var(--qd-err)' : ''
+    var dirty = promptSlotDirty(kind)
     var badge = $('#prompt-badge')
-    if (state.promptDirty) {
+    if (dirty) {
       badge.textContent = '未保存'
       badge.className = 'qd-badge warn'
-    } else if (state.prompt.isDefault) {
+    } else if (slot.isDefault) {
       badge.textContent = '默认'
       badge.className = 'qd-badge'
     } else {
       badge.textContent = '已自定义'
       badge.className = 'qd-badge accent'
     }
-    $('#prompt-state').textContent = state.promptDirty
-      ? '有未保存的改动'
-      : (state.prompt.isDefault ? '当前使用内置默认提示词' : '当前使用自定义提示词')
+    $('#prompt-state').textContent = slot.error
+      ? '读取提示词失败：' + slot.error
+      : (dirty
+          ? '「' + promptKindLabel(kind) + '」有未保存的改动'
+          : (slot.isDefault ? '当前使用内置默认提示词' : '当前使用自定义提示词'))
+    $('#prompt-path').textContent = kind === 'detail' ? 'prompt.detailSystem' : 'prompt.system'
+    // tab 上标出「·未保存」，切走之后也能看到另一套还留着草稿。
+    $all('#prompt-tabs .qd-tab').forEach(function (tab) {
+      var k = tab.getAttribute('data-kind')
+      var on = k === kind
+      tab.setAttribute('data-active', on ? 'true' : 'false')
+      tab.setAttribute('aria-selected', on ? 'true' : 'false')
+      tab.textContent = promptKindLabel(k) + (promptSlotDirty(k) ? ' ·未保存' : '')
+    })
     var sum = document.querySelector('[data-card="prompt"] [data-sum]')
-    if (sum) sum.textContent = state.prompt.isDefault ? '内置默认' : '自定义 ' + state.prompt.system.length + ' 字符'
+    if (sum) {
+      sum.textContent = '普通总结 ' + promptSumText('summary') + ' · 精细版 ' + promptSumText('detail')
+    }
   }
 
-  async function loadPrompt() {
+  /** 读某一套提示词（kind 省略 = 当前 tab）。 */
+  async function loadPrompt(kind) {
+    var k = kind === 'detail' ? 'detail' : (kind === 'summary' ? 'summary' : state.promptKind)
     try {
-      var data = await api('/api/prompt')
-      state.prompt = {
+      var data = await api('/api/prompt' + promptQuery(k))
+      state.prompts[k] = {
         system: data.system || '',
-        effective: data.effective || data.defaultPrompt || '',
+        baseline: data.system || '',
         isDefault: data.isDefault !== false,
         defaultPrompt: data.defaultPrompt || '',
         maxChars: data.maxChars || 20000,
         minChars: data.minChars || 10,
+        error: '',
       }
-      state.promptDirty = false
-      $('#prompt-text').value = state.prompt.system
-      updatePromptMeta()
+      if (state.promptKind === k) $('#prompt-text').value = state.prompts[k].system
     } catch (error) {
-      $('#prompt-state').textContent = '读取提示词失败：' + error.message
+      state.prompts[k].error = error.message
     }
+    updatePromptMeta()
   }
 
+  $all('#prompt-tabs .qd-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      setPromptKind(this.getAttribute('data-kind'))
+    })
+  })
+
   $('#prompt-text').addEventListener('input', function () {
-    state.promptDirty = true
+    var slot = state.prompts[state.promptKind]
+    if (!slot) return
+    slot.system = this.value
     updatePromptMeta()
   })
 
   $('#btn-prompt-save').addEventListener('click', async function () {
     var btn = this
+    var kind = state.promptKind
     btn.disabled = true
     try {
       var text = $('#prompt-text').value
-      var data = await api('/api/prompt', { method: 'POST', body: { system: text } })
-      state.prompt.system = data.system || ''
-      state.prompt.effective = data.effective || data.defaultPrompt || ''
-      state.prompt.isDefault = data.isDefault !== false
-      state.promptDirty = false
+      var data = await api('/api/prompt' + promptQuery(kind), {
+        method: 'POST',
+        body: { kind: kind, system: text },
+      })
+      var slot = state.prompts[kind]
+      slot.system = data.system || ''
+      slot.baseline = slot.system
+      slot.isDefault = data.isDefault !== false
+      if (data.defaultPrompt) slot.defaultPrompt = data.defaultPrompt
+      slot.error = ''
       updatePromptMeta()
-      toast('提示词已保存，下一批总结生效', 'ok')
+      toast('「' + promptKindLabel(kind) + '」提示词已保存，下一批总结生效', 'ok')
     } catch (error) {
       toast('保存失败：' + error.message, 'err')
     } finally {
@@ -1199,25 +1351,27 @@
   })
 
   $('#btn-prompt-reset').addEventListener('click', async function () {
-    if (!confirm('恢复默认提示词？当前的自定义内容会被清空。')) return
+    var kind = state.promptKind
+    if (!confirm('把「' + promptKindLabel(kind) + '」恢复为内置默认提示词？这一套的自定义内容会被清空，另一套不受影响。')) return
     try {
-      await api('/api/prompt/reset', { method: 'POST', body: {} })
-      $('#prompt-text').value = ''
-      await loadPrompt()
-      toast('已恢复默认提示词', 'ok')
+      await api('/api/prompt/reset' + promptQuery(kind), { method: 'POST', body: { kind: kind } })
+      await loadPrompt(kind)
+      toast('已恢复默认提示词（' + promptKindLabel(kind) + '）', 'ok')
     } catch (error) {
       toast('恢复失败：' + error.message, 'err')
     }
   })
 
   $('#btn-prompt-view').addEventListener('click', function () {
-    $('#modal-title').textContent = '内置默认提示词'
-    $('#modal-body').textContent = state.prompt.defaultPrompt || '（读取中…）'
+    var kind = state.promptKind
+    var slot = state.prompts[kind]
+    $('#modal-title').textContent = '内置默认提示词 · ' + promptKindLabel(kind)
+    $('#modal-body').textContent = slot.defaultPrompt || '（读取中…）'
     $('#modal').classList.add('show')
-    if (!state.prompt.defaultPrompt) {
-      api('/api/prompt').then(function (data) {
-        state.prompt.defaultPrompt = data.defaultPrompt || ''
-        $('#modal-body').textContent = state.prompt.defaultPrompt
+    if (!slot.defaultPrompt) {
+      api('/api/prompt' + promptQuery(kind)).then(function (data) {
+        slot.defaultPrompt = data.defaultPrompt || ''
+        $('#modal-body').textContent = slot.defaultPrompt || '（后端没有返回默认提示词）'
       }).catch(function (error) {
         $('#modal-body').textContent = '读取失败：' + error.message
       })
@@ -1293,9 +1447,9 @@
     sum('batch', '阈值 ' + ((s.batch && s.batch.threshold) || 100) + ' 条')
     var prov = getPath(s, 'model.provider')
     sum('model', prov ? prov + ' / ' + (getPath(s, 'model.model') || '默认') : 'DSH 默认模型')
-    sum('delivery', friends().length + ' 位好友' + (s.dryRun ? ' · 预演模式' : ''))
+    sum('delivery', (friends().length > 0 ? friends().length + ' 位好友' : '未配置（只存网页端）') + (s.dryRun ? ' · 预演模式' : ''))
     sum('storage', '日志保留 ' + ((s.storage && s.storage.keepDays) || 7) + ' 天' + (s.dryRun ? ' · dryRun' : ''))
-    sum('prompt', state.prompt.isDefault ? '内置默认' : '自定义 ' + state.prompt.system.length + ' 字符')
+    sum('prompt', '普通总结 ' + promptSumText('summary') + ' · 精细版 ' + promptSumText('detail'))
   }
 
   $('#btn-save').addEventListener('click', async function () {
@@ -1335,6 +1489,13 @@
     }
     await loadSettings()
     clearDirty()
+    // 提示词草稿不在 settings 里，撤销要单独回滚两套槽位。
+    ;['summary', 'detail'].forEach(function (kind) {
+      var slot = state.prompts[kind]
+      if (slot) slot.system = slot.baseline
+    })
+    $('#prompt-text').value = curPrompt().system
+    updatePromptMeta()
     toast('已撤销改动', 'ok')
   })
 
@@ -1514,7 +1675,7 @@
       toast('读取配置失败：' + error.message, 'err')
       return
     }
-    await Promise.all([loadPrompt(), loadModels(), loadGroups(), loadFriends()])
+    await Promise.all([loadPrompt('summary'), loadPrompt('detail'), loadModels(), loadGroups(), loadFriends()])
     if (state.memberGroup) loadMembers(state.memberGroup)
     await refreshStatus()
     state.statusTimer = setInterval(refreshStatus, 5000)

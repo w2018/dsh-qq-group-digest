@@ -58,7 +58,12 @@ import { Runtime } from './lib/runtime.js'
 import { HttpServer } from './lib/http/server.js'
 import { LogStore } from './lib/store/logs.js'
 import { getSvc } from './lib/summarize/summarize.js'
-import { DEFAULT_SYSTEM_PROMPT, isDefaultPrompt } from './lib/summarize/prompt-store.js'
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_DETAIL_SYSTEM_PROMPT,
+  isDefaultPrompt,
+  isDefaultDetailPrompt,
+} from './lib/summarize/prompt-store.js'
 
 export const name = 'qq-group-digest'
 
@@ -181,23 +186,51 @@ export function apply(ctx, config = {}) {
   /** patch 初始值 + UI 覆盖 = 最终生效配置。 */
   const effectiveConfig = () => deepMerge(baseConfig, readSettings(settingsFile))
 
+  /**
+   * 两套 system prompt：'summary'（普通 QQ 总结，默认）与 'detail'（AI 精细版）。
+   * 非法值一律按 'summary' 处理，前端传错不至于 500。
+   */
+  const promptKind = (value) => {
+    const kind = String(value == null ? '' : value).trim().toLowerCase()
+    return kind === 'detail' ? 'detail' : 'summary'
+  }
+
+  /** 某个 kind 对应的 settings.json 字段名（prompt.system / prompt.detailSystem）。 */
+  const promptField = (kind) => (promptKind(kind) === 'detail' ? 'detailSystem' : 'system')
+
+  /** 某个 kind 的内置默认文本。 */
+  const defaultPromptOf = (kind) =>
+    promptKind(kind) === 'detail' ? DEFAULT_DETAIL_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT
+
+  /** 与内置默认逐字比较（判断「内容一样但被当成自定义」）。 */
+  const isBuiltinPrompt = (kind, text) =>
+    promptKind(kind) === 'detail' ? isDefaultDetailPrompt(text) : isDefaultPrompt(text)
+
   /** 当前生效的自定义 system prompt（空串 = 用内置默认）。 */
-  const currentPrompt = () => String((runtime.cfg && runtime.cfg.prompt && runtime.cfg.prompt.system) || '')
+  const currentPrompt = (kind) => {
+    const field = promptField(kind)
+    return String((runtime.cfg && runtime.cfg.prompt && runtime.cfg.prompt[field]) || '')
+  }
 
   /**
-   * 写 prompt.system 并热重建运行态。
+   * 写 prompt.system / prompt.detailSystem 并热重建运行态。
    *
-   * prompt.system 不在 settings.js 白名单里，所以不能走通用的
+   * prompt.* 不在 settings.js 白名单里，所以不能走通用的
    * readSettings/writeSettings（会被 sanitizeOverride 丢掉）；这里直接读原始
    * JSON、合并、再原子写回，同时把结果同步给 runtime。
    * 返回 { ok, errors }，errors 非空时**不落盘**。
    */
-  const applyPrompt = (system) => {
+  const applyPrompt = (kind, system) => {
+    const field = promptField(kind)
     const raw = readJson(settingsFile, {})
     const merged = Object.assign({}, raw && typeof raw === 'object' ? raw : {})
-    merged.prompt = Object.assign({}, merged.prompt && typeof merged.prompt === 'object' ? merged.prompt : {}, {
-      system,
-    })
+    const patch = {}
+    patch[field] = system
+    merged.prompt = Object.assign(
+      {},
+      merged.prompt && typeof merged.prompt === 'object' ? merged.prompt : {},
+      patch,
+    )
     const result = runtime.reconfigure(deepMerge(baseConfig, merged))
     if (!result.ok) return { ok: false, errors: result.errors || [] }
     writeJsonAtomic(settingsFile, merged)
@@ -316,10 +349,21 @@ export function apply(ctx, config = {}) {
   // ── HTTP 路由 ──────────────────────────────────────────────────
   const handler = async (req, res) => {
     let pathname = '/'
+    // 保留整个 URL 对象：/prompt 系列端点要从 ?kind= 取参数。
+    let reqUrl = null
     try {
-      pathname = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname)
+      reqUrl = new URL(req.url || '/', 'http://localhost')
+      pathname = decodeURIComponent(reqUrl.pathname)
     } catch {
       /* 畸形 URL 落 404 */
+    }
+    // 畸形 URL 时 searchParams 不可用，退化成空参对象（端点仍按默认 kind 处理）。
+    const query = (name) => {
+      try {
+        return reqUrl ? reqUrl.searchParams.get(name) : null
+      } catch {
+        return null
+      }
     }
 
     if (pathname === '/api/qq-digest/status' && req.method === 'GET') {
@@ -352,8 +396,12 @@ export function apply(ctx, config = {}) {
         // 前者供提示词卡片回显，后者只回掩码 + 是否存在。
         promptSystem: runtime.cfg.prompt ? String(runtime.cfg.prompt.system || '') : '',
         promptIsDefault: !(runtime.cfg.prompt && runtime.cfg.prompt.system),
+        // 精细版提示词（v0.5.0 起与普通版并列，各自可编辑、可恢复默认）。
+        promptDetailSystem: runtime.cfg.prompt ? String(runtime.cfg.prompt.detailSystem || '') : '',
+        promptDetailIsDefault: !(runtime.cfg.prompt && runtime.cfg.prompt.detailSystem),
         promptMaxChars: MAX_PROMPT_CHARS,
         defaultPrompt: DEFAULT_SYSTEM_PROMPT,
+        defaultDetailPrompt: DEFAULT_DETAIL_SYSTEM_PROMPT,
         summaryAiDetail: Boolean(runtime.cfg.summary && runtime.cfg.summary.aiDetail),
         httpServer: httpStatus(),
         settingsFile,
@@ -659,17 +707,21 @@ export function apply(ctx, config = {}) {
     // 不放在 settings 白名单里：自定义 prompt 是一大段文本，走通用保存流程
     // 一旦被 sanitizeOverride 丢弃就是静默丢失，所以单独开三个端点。
     if (pathname === '/api/qq-digest/prompt' && req.method === 'GET') {
-      const system = currentPrompt()
+      // ?kind=summary|detail：两套提示词各自独立读写，非法值按 summary。
+      const kind = promptKind(query('kind'))
+      const system = currentPrompt(kind)
+      const fallback = defaultPromptOf(kind)
       sendJson(res, 200, {
         ok: true,
+        kind,
         // system 是「settings.json 里存的原样值」：空串表示用户没自定义。
         // 前端 textarea 直接回显它，这样「未自定义」时输入框是空的，
         // 而不是把内置默认灌进去让人误以为已经保存过一份自定义。
         system,
         // effective 才是真正送给模型的 system prompt（空 → 内置默认）。
-        effective: system || DEFAULT_SYSTEM_PROMPT,
+        effective: system || fallback,
         isDefault: !system,
-        defaultPrompt: DEFAULT_SYSTEM_PROMPT,
+        defaultPrompt: fallback,
         maxChars: MAX_PROMPT_CHARS,
         minChars: MIN_PROMPT_CHARS,
       })
@@ -680,6 +732,10 @@ export function apply(ctx, config = {}) {
       try {
         const raw = await readBody(req, 256 * 1024)
         const body = raw ? JSON.parse(raw) : {}
+        // kind 也允许走 query（POST 用 body.kind 优先，其次 query）。
+        const kind = promptKind(
+          body && body.kind != null ? body.kind : query('kind'),
+        )
         const system = String((body && body.system) == null ? '' : body.system).trim()
         if (system.length > MAX_PROMPT_CHARS) {
           sendJson(res, 400, {
@@ -700,20 +756,23 @@ export function apply(ctx, config = {}) {
         }
         // 与内置默认逐字相同就存空串，让 isDefault 保持 true，避免出现
         // 「内容一样但被当成自定义」的状态。
-        const stored = isDefaultPrompt(system) ? '' : system
-        const applied = applyPrompt(stored)
+        const stored = isBuiltinPrompt(kind, system) ? '' : system
+        const applied = applyPrompt(kind, stored)
         if (!applied.ok) {
           sendJson(res, 400, { ok: false, error: applied.errors.join('；'), configErrors: applied.errors })
           return
         }
         sendJson(res, 200, {
           ok: true,
+          kind,
           // 与 GET /prompt 保持同一套语义：system = 落盘的原样值（空串 = 用默认）。
           system: stored,
-          effective: stored || DEFAULT_SYSTEM_PROMPT,
+          effective: stored || defaultPromptOf(kind),
           isDefault: !stored,
           length: stored.length,
           maxChars: MAX_PROMPT_CHARS,
+          minChars: MIN_PROMPT_CHARS,
+          defaultPrompt: defaultPromptOf(kind),
           restarts: runtime.restarts,
           configErrors: runtime.errors,
           droppedFields: [],
@@ -726,17 +785,29 @@ export function apply(ctx, config = {}) {
 
     if (pathname === '/api/qq-digest/prompt/reset' && req.method === 'POST') {
       try {
-        const applied = applyPrompt('')
+        // 只重置指定的那一套；body.kind / ?kind= 缺省为 summary。
+        let body = {}
+        try {
+          const raw = await readBody(req, 256 * 1024)
+          body = raw ? JSON.parse(raw) : {}
+        } catch {
+          body = {}
+        }
+        const kind = promptKind(body && body.kind != null ? body.kind : query('kind'))
+        const applied = applyPrompt(kind, '')
         if (!applied.ok) {
           sendJson(res, 400, { ok: false, error: applied.errors.join('；'), configErrors: applied.errors })
           return
         }
         sendJson(res, 200, {
           ok: true,
+          kind,
           isDefault: true,
           system: '',
-          effective: DEFAULT_SYSTEM_PROMPT,
-          defaultPrompt: DEFAULT_SYSTEM_PROMPT,
+          effective: defaultPromptOf(kind),
+          defaultPrompt: defaultPromptOf(kind),
+          maxChars: MAX_PROMPT_CHARS,
+          minChars: MIN_PROMPT_CHARS,
           restarts: runtime.restarts,
           configErrors: runtime.errors,
         })

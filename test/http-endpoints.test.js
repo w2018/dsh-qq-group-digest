@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 
-import { DEFAULT_SYSTEM_PROMPT } from '../lib/summarize/prompt-store.js'
+import { DEFAULT_SYSTEM_PROMPT, DEFAULT_DETAIL_SYSTEM_PROMPT } from '../lib/summarize/prompt-store.js'
 
 // 关键：先把 DSH_HOME 指到临时目录，再 import index.js。
 // 否则 storage.dir 为空时 settings.json 会落到用户真实的 ~/.dsh 下。
@@ -383,4 +383,103 @@ test('通用 POST /settings 改 httpServer 段会真正重启监听（不再只�
   await new Promise((resolve) => setTimeout(resolve, 200))
   const stopped = await call('GET', '/api/qq-digest/http')
   assert.equal(stopped.body.listening, false, '关闭开关后必须停止监听')
+})
+
+// ── D：双提示词（kind=summary / detail） ────────────────────────
+
+test('GET /prompt?kind=detail 返回精细版默认提示词，与普通版互不影响', async () => {
+  const r = await call('GET', '/api/qq-digest/prompt?kind=detail')
+  assert.equal(r.status, 200)
+  assert.equal(r.body.kind, 'detail')
+  assert.equal(r.body.isDefault, true)
+  assert.equal(r.body.system, '')
+  assert.equal(r.body.effective, DEFAULT_DETAIL_SYSTEM_PROMPT)
+  assert.equal(r.body.defaultPrompt, DEFAULT_DETAIL_SYSTEM_PROMPT)
+  assert.notEqual(r.body.defaultPrompt, DEFAULT_SYSTEM_PROMPT)
+
+  // 普通版仍然是普通版。
+  const plain = await call('GET', '/api/qq-digest/prompt')
+  assert.equal(plain.body.kind, 'summary')
+  assert.equal(plain.body.defaultPrompt, DEFAULT_SYSTEM_PROMPT)
+})
+
+test('POST /prompt kind=detail 只写 prompt.detailSystem，不碰 prompt.system', async () => {
+  const detailCustom = '你是精细版助手：请输出高频词条、要点与结论，不要编造未出现的内容。'
+  const saved = await call('POST', '/api/qq-digest/prompt', { kind: 'detail', system: detailCustom })
+  assert.equal(saved.status, 200)
+  assert.equal(saved.body.kind, 'detail')
+  assert.equal(saved.body.system, detailCustom)
+  assert.equal(saved.body.isDefault, false)
+
+  const raw = readSettingsFile()
+  assert.equal(raw.prompt.detailSystem, detailCustom)
+  assert.equal(raw.prompt.system || '', '', '普通版不该被 kind=detail 写入')
+
+  // 普通版读到的是自己的默认值，没被串改。
+  const plain = await call('GET', '/api/qq-digest/prompt')
+  assert.equal(plain.body.system, '')
+  assert.equal(plain.body.isDefault, true)
+
+  // 收尾
+  await call('POST', '/api/qq-digest/prompt/reset', { kind: 'detail' })
+})
+
+test('POST /prompt/reset kind=detail 只清精细版，普通版自定义保留', async () => {
+  const plainCustom = '普通版自定义提示词，长度足够通过校验，用来验证两个 kind 互不干扰。'
+  const detailCustom = '精细版自定义提示词，长度同样足够通过校验，验证 reset 的隔离性。'
+  await call('POST', '/api/qq-digest/prompt', { system: plainCustom })
+  await call('POST', '/api/qq-digest/prompt', { kind: 'detail', system: detailCustom })
+
+  const r = await call('POST', '/api/qq-digest/prompt/reset', { kind: 'detail' })
+  assert.equal(r.status, 200)
+  assert.equal(r.body.kind, 'detail')
+  assert.equal(r.body.isDefault, true)
+
+  const raw = readSettingsFile()
+  assert.equal(raw.prompt.detailSystem || '', '')
+  assert.equal(raw.prompt.system, plainCustom, '普通版不该被 detail 的 reset 清掉')
+
+  await call('POST', '/api/qq-digest/prompt/reset', {})
+  assert.equal(readSettingsFile().prompt.system, '')
+})
+
+test('GET/POST /prompt 的 kind 非法值按 summary 处理', async () => {
+  const got = await call('GET', '/api/qq-digest/prompt?kind=whatever')
+  assert.equal(got.body.kind, 'summary')
+  assert.equal(got.body.defaultPrompt, DEFAULT_SYSTEM_PROMPT)
+
+  const custom = '非法 kind 也要按普通版保存，长度足够通过最小长度校验。'
+  const saved = await call('POST', '/api/qq-digest/prompt', { kind: 'nope', system: custom })
+  assert.equal(saved.status, 200)
+  assert.equal(saved.body.kind, 'summary')
+  assert.equal(readSettingsFile().prompt.system, custom)
+  await call('POST', '/api/qq-digest/prompt/reset', {})
+})
+
+test('POST /prompt?kind=detail 走 query 也能选中精细版', async () => {
+  const custom = '通过 query 指定 kind 的精细版提示词，长度足够通过校验。'
+  const saved = await call('POST', '/api/qq-digest/prompt?kind=detail', { system: custom })
+  assert.equal(saved.status, 200)
+  assert.equal(saved.body.kind, 'detail')
+  assert.equal(readSettingsFile().prompt.detailSystem, custom)
+  await call('POST', '/api/qq-digest/prompt/reset', { kind: 'detail' })
+})
+
+test('POST /prompt kind=detail 传精细版内置默认时也存空串', async () => {
+  const r = await call('POST', '/api/qq-digest/prompt', {
+    kind: 'detail',
+    system: DEFAULT_DETAIL_SYSTEM_PROMPT,
+  })
+  assert.equal(r.status, 200)
+  assert.equal(r.body.isDefault, true)
+  assert.equal(readSettingsFile().prompt.detailSystem, '')
+})
+
+test('GET /settings 带出精细版提示词字段与两套默认提示词', async () => {
+  const r = await call('GET', '/api/qq-digest/settings')
+  assert.equal(r.status, 200)
+  assert.equal(typeof r.body.promptDetailSystem, 'string')
+  assert.equal(r.body.promptDetailIsDefault, true)
+  assert.equal(r.body.defaultPrompt, DEFAULT_SYSTEM_PROMPT)
+  assert.equal(r.body.defaultDetailPrompt, DEFAULT_DETAIL_SYSTEM_PROMPT)
 })

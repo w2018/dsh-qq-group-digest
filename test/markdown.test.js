@@ -26,18 +26,17 @@ function baseEntry(overrides) {
   )
 }
 
-test('renderDetailedMarkdown 正常渲染出四段结构与表格', () => {
+test('renderDetailedMarkdown 正常渲染出三段结构，且不含成员表', () => {
   const md = renderDetailedMarkdown(baseEntry())
   assert.match(md, /^# 100000001 · AI大模型交流/)
   assert.match(md, /^> .*7 条消息 · 2 位发言人 · workbuddy\/deepseek-v4\.1-flash/m)
   assert.match(md, /## 一、本批主线\n本批主线是讨论 deepseek 的部署方式。/)
   assert.match(md, /## 二、要点\n【王五】主张先用本地模型，【张三】同意。/)
-  // 成员表列数后续可能扩展（如「本次重点」），断言只锚定前三列，避免加列就假失败。
-  assert.match(md, /## 三、参与成员\n\| 成员 \| QQ \| 发言数 \|/)
-  assert.match(md, /\| :--- \| :--- \| ---: \|/)
-  assert.match(md, /\| 王五 \| 123456 \| 7 \|/)
-  assert.match(md, /\| 张三 \| 654321 \| 3 \|/)
-  assert.match(md, /## 四、投递状态/)
+  // v0.5.0：成员表不再进正文（网页详情页与导出各自负责），投递状态升为第三节。
+  assert.match(md, /## 三、投递状态/)
+  assert.equal(md.includes('## 参与成员'), false)
+  assert.equal(md.includes('| 成员 | QQ | 发言数 |'), false)
+  assert.equal(md.includes('## 四、'), false)
   assert.match(md, /- 状态：成功/)
   assert.match(md, /- 投递成功：2 人 \/ 失败：1 人/)
   assert.match(md, /- 批次：b1-100000001/)
@@ -49,13 +48,16 @@ test('entry.text 为空时渲染「（本批无有效讨论内容）」', () => 
   assert.match(md, /## 二、要点\n（无）/)
 })
 
-test('participants 为空时成员表渲染「（未记录）」', () => {
+test('participants 为空时正文不出现成员表，但 meta 仍写 0 位发言人', () => {
   const md = renderDetailedMarkdown(baseEntry({ participants: [] }))
-  assert.match(md, /\| （未记录） \|/)
+  assert.equal(md.includes('（未记录）'), false)
   assert.match(md, /0 位发言人/)
   // 缺字段（旧存档）同样走空分支
   const legacy = renderDetailedMarkdown(baseEntry({ participants: undefined }))
-  assert.match(legacy, /\| （未记录） \|/)
+  assert.equal(legacy.includes('（未记录）'), false)
+  assert.match(legacy, /0 位发言人/)
+  // 空表由 renderMembersSection 负责（导出时用）
+  assert.match(renderMembersSection([]), /\| （未记录） \|/)
 })
 
 test('群名为空时标题只显示一次群号（不重复）', () => {
@@ -92,24 +94,18 @@ test('超长 Markdown 截断到 MAX_MD 并加截断标记', () => {
 })
 
 test('表格单元格里的竖线与换行被转义，不会撑破列', () => {
-  const md = renderDetailedMarkdown(
-    baseEntry({ participants: [{ id: '1', name: 'a|b\nc', count: 2 }] }),
-  )
-  assert.match(md, /\| a\\\|b c \| 1 \| 2 \|/)
+  const section = renderMembersSection([{ id: '1', name: 'a|b\nc', count: 2 }])
+  assert.match(section, /\| a\\\|b c \| 1 \| 2 \|/)
 })
 
 test('成员表带上「本次重点」列，focus 为空时填 —', () => {
-  const md = renderDetailedMarkdown(
-    baseEntry({
-      participants: [
-        { id: '1', name: '王五', count: 5, focus: '主张本地模型' },
-        { id: '2', name: '张三', count: 2 },
-      ],
-    }),
-  )
-  assert.match(md, /\| 成员 \| QQ \| 发言数 \| 本次重点 \|/)
-  assert.match(md, /\| 王五 \| 1 \| 5 \| 主张本地模型 \|/)
-  assert.match(md, /\| 张三 \| 2 \| 2 \| — \|/)
+  const section = renderMembersSection([
+    { id: '1', name: '王五', count: 5, focus: '主张本地模型' },
+    { id: '2', name: '张三', count: 2 },
+  ])
+  assert.match(section, /\| 成员 \| QQ \| 发言数 \| 本次重点 \|/)
+  assert.match(section, /\| 王五 \| 1 \| 5 \| 主张本地模型 \|/)
+  assert.match(section, /\| 张三 \| 2 \| 2 \| — \|/)
 })
 
 test('renderMembersSection 可单独追加到 AI 正文之后', () => {
@@ -130,5 +126,5 @@ test('空 entry / 非对象入参不抛错', () => {
   assert.match(a, /^# 未知群/)
   assert.match(a, /（本批无有效讨论内容）/)
   const b = renderDetailedMarkdown(null)
-  assert.match(b, /## 四、投递状态/)
+  assert.match(b, /## 三、投递状态/)
 })

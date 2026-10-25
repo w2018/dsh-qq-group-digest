@@ -47,7 +47,7 @@ export function fakeLlm(script) {
     listProviders: () => [{ id: 'p' }],
     listModels: async () => [{ id: 'm' }],
     stream(options) {
-      calls.push({ provider: options.provider, model: options.model, system: options.system })
+      calls.push({ provider: options.provider, model: options.model, system: options.system, maxTokens: options.maxTokens })
       const item = queue.length > 1 ? queue.shift() : queue[0]
       return (async function* gen() {
         if (item && item.throw) throw new Error(item.throw)
@@ -55,8 +55,9 @@ export function fakeLlm(script) {
           yield { type: 'finish', reason: { kind: 'error', failure: { message: item.message || '模型错误' } } }
           return
         }
+        if (item && item.reasoning) yield { type: 'reasoning-delta', text: item.reasoning }
         yield { type: 'text-delta', text: item && item.text ? item.text : '兜底总结' }
-        yield { type: 'finish', reason: { kind: 'stop' } }
+        yield { type: 'finish', reason: { kind: (item && item.finishKind) || 'stop' } }
       })()
     },
   }

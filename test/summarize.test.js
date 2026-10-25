@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import { resolveRoute, summarizeBatch } from '../lib/summarize/summarize.js'
 import { buildUserPrompt, buildFallbackText, buildDetailSystemPrompt } from '../lib/summarize/prompt.js'
+import { DEFAULT_SYSTEM_PROMPT } from '../lib/summarize/prompt-store.js'
 import { fakeLlm, fakeCtx, silentLogger } from './helpers.js'
 
 const recs = [
@@ -94,6 +95,75 @@ test('summarizeBatch 把过短返回视为失败', async () => {
   })
   assert.equal(res.ok, false)
   assert.match(res.error, /过短/)
+})
+
+test('summarizeBatch 把 finishKind=max-tokens 视为失败（不再当成功落盘）', async () => {
+  const ctx = fakeCtx(fakeLlm([{ text: '- 【さくらい ゆ', finishKind: 'max-tokens', reasoning: '推理' }]))
+  const res = await summarizeBatch(ctx, recs, {
+    groupId: '1',
+    modelConfig: { provider: 'p', model: 'm', retries: 0 },
+    logger: silentLogger,
+  })
+  assert.equal(res.ok, false)
+  assert.equal(res.kind, 'call')
+  assert.match(res.error, /模型输出被截断/)
+  assert.match(res.error, /maxTokens 用尽/)
+  assert.match(res.error, /正文 9 字/)
+  assert.match(res.error, /推理 2 字/)
+})
+
+test('summarizeBatch 截断后重试，第 2 次起 maxTokens 翻倍', async () => {
+  const llm = fakeLlm([
+    { text: '被截断的一段', finishKind: 'max-tokens' },
+    { text: '第二次拿到了完整的一段总结，内容足够长。' },
+  ])
+  const ctx = fakeCtx(llm)
+  const res = await summarizeBatch(ctx, recs, {
+    groupId: '1',
+    modelConfig: { provider: 'p', model: 'm', retries: 1, backoffMs: 1, maxTokens: 2048 },
+    logger: silentLogger,
+  })
+  assert.equal(res.ok, true)
+  assert.equal(res.attempts, 2)
+  assert.equal(llm.calls[0].maxTokens, 2048)
+  assert.equal(llm.calls[1].maxTokens, 4096)
+})
+
+test('summarizeBatch maxTokens 翻倍有 32000 上限', async () => {
+  const llm = fakeLlm([
+    { text: '被截断的一段', finishKind: 'max-tokens' },
+    { text: '被截断的一段', finishKind: 'max-tokens' },
+    { text: '第三次终于完整了，内容足够长的一段总结。' },
+  ])
+  const ctx = fakeCtx(llm)
+  const res = await summarizeBatch(ctx, recs, {
+    groupId: '1',
+    modelConfig: { provider: 'p', model: 'm', retries: 2, backoffMs: 1, maxTokens: 20000 },
+    logger: silentLogger,
+  })
+  assert.equal(res.ok, true)
+  assert.equal(res.attempts, 3)
+  assert.equal(llm.calls[1].maxTokens, 32000)
+  assert.equal(llm.calls[2].maxTokens, 32000)
+})
+
+test('summarizeBatch 用 opts.systemPrompt 作为 system', async () => {
+  const llm = fakeLlm([{ text: '自定义提示词下的一段总结，长度足够。' }])
+  const ctx = fakeCtx(llm)
+  await summarizeBatch(ctx, recs, {
+    groupId: '1',
+    modelConfig: { provider: 'p', model: 'm', retries: 0 },
+    systemPrompt: '  你是自定义助手  ',
+    logger: silentLogger,
+  })
+  assert.equal(llm.calls[0].system, '你是自定义助手')
+})
+
+test('summarizeBatch 不传 systemPrompt 时用内置默认', async () => {
+  const llm = fakeLlm([{ text: '默认提示词下的一段总结，长度足够。' }])
+  const ctx = fakeCtx(llm)
+  await summarizeBatch(ctx, recs, { groupId: '1', modelConfig: { provider: 'p', model: 'm', retries: 0 }, logger: silentLogger })
+  assert.equal(llm.calls[0].system, DEFAULT_SYSTEM_PROMPT)
 })
 
 test('buildUserPrompt 含群名群号时间范围', () => {

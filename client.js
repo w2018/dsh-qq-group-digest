@@ -86,6 +86,10 @@ window.__ModuleLoader__.load({
         '.qqd-token { flex: 1 1 220px; min-width: 160px; height: 32px; padding: 0 9px; box-sizing: border-box; border-radius: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: inherit; background: rgba(127,127,127,0.06); border: 1px solid rgba(127,127,127,0.2); }',
         '.qqd-counter { font-size: 11.5px; opacity: .6; font-variant-numeric: tabular-nums; }',
         '.qqd-counter[data-kind="over"] { color: #c62828; opacity: 1; }',
+        '.qqd-tabs { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 9px; background: rgba(127,127,127,0.1); align-self: flex-start; }',
+        '.qqd-tab { height: 26px; padding: 0 12px; border-radius: 7px; border: none; background: transparent; color: inherit; font: inherit; font-size: 12.5px; opacity: .72; cursor: pointer; }',
+        '.qqd-tab:hover { opacity: 1; }',
+        '.qqd-tab[data-active="true"] { background: rgba(127,127,127,0.22); opacity: 1; font-weight: 600; }',
       ].join('\n')
       document.head.appendChild(style)
     }
@@ -418,6 +422,81 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** 一套提示词（summary 普通总结 / detail AI 精细版）的槽位。 */
+    function emptyPromptSlot() {
+      return {
+        system: '',        // settings.json 里存的原样值，空串 = 用内置默认
+        baseline: '',      // 保存后的原值，用来算「未保存」
+        isDefault: true,
+        defaultPrompt: '',
+        maxChars: 20000,
+        minChars: 10,
+        error: '',
+        loaded: false,
+      }
+    }
+
+    // 两套提示词共用一个卡片、两个 tab。顺序即 tab 顺序。
+    const PROMPT_TABS = [
+      {
+        key: 'summary',
+        label: '普通总结',
+        hint: '阈值批次触发的常规总结用的 system prompt。留空即使用内置默认；修改后保存会热重建运行态，不需要重启 DSH。',
+        placeholder: '留空 = 使用内置默认提示词。点下方「查看默认提示词」可参照默认内容改写。',
+      },
+      {
+        key: 'detail',
+        label: 'AI 精细版',
+        hint: '「AI 精细版」重新整理历史总结时用的 system prompt，与普通总结完全独立。留空即使用内置默认。',
+        placeholder: '留空 = 使用内置默认的精细版提示词。点下方「查看默认提示词」可参照默认内容改写。',
+      },
+    ]
+
+    /** 某套提示词的请求参数：summary 走默认，detail 带 ?kind=detail。 */
+    function promptQuery(kind) {
+      return kind === 'detail' ? '?kind=detail' : ''
+    }
+
+    /**
+     * 重连倒计时：后端 5 秒才轮询一次，nextRetryAt 是个固定时间点，
+     * 这里本地每秒重算一次剩余秒数，让徽章上的数字平滑递减。
+     * 没有 nextRetryAt（旧后端）时 active 为 false，不挂定时器。
+     */
+    function useLinkTick(active) {
+      const [now, setNow] = useState(function () { return Date.now() })
+      useEffect(function () {
+        if (!active) return undefined
+        setNow(Date.now())
+        const timer = setInterval(function () { setNow(Date.now()) }, 1000)
+        return function () { clearInterval(timer) }
+      }, [active])
+      return now
+    }
+
+    /**
+     * 协议端连接徽章的三态：
+     *   已连接 → 绿色「协议端已连接」
+     *   重连中 → 橙色「协议端已断开，N 秒后重连（第 K 次）」，N 到 0 变「正在重连…」
+     *   未连接 → 灰色「协议端未连接」
+     * 字段缺失（旧后端）时回退到 connected 布尔值。
+     */
+    function linkBadgeOf(link, now) {
+      const ws = link || {}
+      const attempt = Math.max(0, Math.trunc(Number(ws.reconnectAttempt) || 0))
+      if (ws.connected === true) {
+        return { text: '协议端已连接', kind: 'ok', title: ws.wsUrl ? String(ws.wsUrl) : '' }
+      }
+      if (ws.reconnecting === true) {
+        const left = Math.ceil(((Number(ws.nextRetryAt) || 0) - now) / 1000)
+        const suffix = attempt > 0 ? '（第 ' + attempt + ' 次）' : ''
+        if (left > 0) {
+          return { text: '协议端已断开，' + left + ' 秒后重连' + suffix, kind: 'warn', title: ws.wsUrl ? String(ws.wsUrl) : '' }
+        }
+        return { text: '正在重连…' + suffix, kind: 'warn', title: ws.wsUrl ? String(ws.wsUrl) : '' }
+      }
+      return { text: '协议端未连接', kind: '', title: ws.wsUrl ? String(ws.wsUrl) : '' }
+    }
+
     function SettingsPage() {
       const [loading, setLoading] = useState(true)
       const [saving, setSaving] = useState(false)
@@ -436,9 +515,14 @@ window.__ModuleLoader__.load({
       const [live, setLive] = useState(null)
       // 提示词与网页服务的密钥不随 form 走：prompt.system 不在 settings 白名单里，
       // token 也绝不能出现在普通保存请求里。
-      const [promptSystem, setPromptSystem] = useState('')
-      const [promptBaseline, setPromptBaseline] = useState('')
-      const [promptMeta, setPromptMeta] = useState({ defaultPrompt: '', maxChars: 20000, minChars: 10 })
+      //
+      // v0.5.0：两套提示词各自独立（summary 普通总结 / detail AI 精细版），
+      // 分别存在两个槽位里。切 tab 只换展示，未保存的草稿留在自己的槽位，
+      // 不会被另一套内容顶掉。
+      const [promptTab, setPromptTab] = useState('summary')
+      const [prompts, setPrompts] = useState(function () {
+        return { summary: emptyPromptSlot(), detail: emptyPromptSlot() }
+      })
       const [showDefault, setShowDefault] = useState(false)
       const [http, setHttp] = useState(null)
       const [plainToken, setPlainToken] = useState('')
@@ -478,23 +562,48 @@ window.__ModuleLoader__.load({
         })
       }, [baseline])
 
-      const loadPrompt = useCallback(async function () {
-        try {
-          const d = await api('/prompt')
-          if (!aliveRef.current) return
+      /** 把某套提示词的接口响应并进它的槽位；不改另一套。 */
+      const applyPromptPayload = useCallback(function (kind, d) {
+        setPrompts(function (prev) {
+          const slot = prev[kind] || emptyPromptSlot()
           const system = typeof d.system === 'string' ? d.system : ''
-          setPromptSystem(system)
-          setPromptBaseline(system)
-          setPromptMeta({
-            defaultPrompt: typeof d.defaultPrompt === 'string' ? d.defaultPrompt : '',
+          const next = Object.assign({}, slot, {
+            system,
+            baseline: system,
+            isDefault: d.isDefault !== false,
+            defaultPrompt: typeof d.defaultPrompt === 'string' ? d.defaultPrompt : slot.defaultPrompt,
             maxChars: Number(d.maxChars) || 20000,
             minChars: Number(d.minChars) || 10,
+            error: '',
+            loaded: true,
           })
-        } catch (e) {
-          // 后端还是旧代码（没有 /prompt）时静默降级：卡片会显示提示，不影响其它设置。
-          if (aliveRef.current) setPromptMeta(function (prev) { return Object.assign({}, prev, { error: e.message || String(e) }) })
-        }
+          const out = Object.assign({}, prev)
+          out[kind] = next
+          return out
+        })
       }, [])
+
+      const loadPrompt = useCallback(async function (kind) {
+        const k = kind === 'detail' ? 'detail' : 'summary'
+        try {
+          const d = await api('/prompt' + promptQuery(k))
+          if (!aliveRef.current) return
+          applyPromptPayload(k, d)
+        } catch (e) {
+          // 后端还是旧代码（没有 /prompt 或没有 kind）时静默降级：
+          // 卡片会显示提示，不影响其它设置。
+          const message = e.message || String(e)
+          setPrompts(function (prev) {
+            const out = Object.assign({}, prev)
+            out[k] = Object.assign({}, out[k] || emptyPromptSlot(), { error: message })
+            return out
+          })
+        }
+      }, [applyPromptPayload])
+
+      const loadAllPrompts = useCallback(async function () {
+        await Promise.all([loadPrompt('summary'), loadPrompt('detail')])
+      }, [loadPrompt])
 
       const loadHttp = useCallback(async function () {
         try {
@@ -521,14 +630,14 @@ window.__ModuleLoader__.load({
           api('/friends').then(function (d) { if (aliveRef.current) setFriends(d) }).catch(function () {})
           api('/recent').then(function (d) { if (aliveRef.current) setRecent(d.recent || []) }).catch(function () {})
           api('/status').then(function (d) { if (aliveRef.current) setLive(d) }).catch(function () {})
-          loadPrompt()
+          loadAllPrompts()
           loadHttp()
         } catch (error) {
           if (aliveRef.current) flash(error.message || String(error), 'error')
         } finally {
           if (aliveRef.current) setLoading(false)
         }
-      }, [flash])
+      }, [flash, loadAllPrompts])
 
       // 只在挂载时拉一次：放进依赖会因数组引用变化反复重置用户正在编辑的内容。
       useEffect(function () {
@@ -548,6 +657,10 @@ window.__ModuleLoader__.load({
             configErrors: d.configErrors,
             startError: d.startError,
             wsConnected: Boolean(d.ws && d.ws.connected),
+            // F-3：重连倒计时要用的连接态细节（旧后端没有这些字段时为 undefined，
+            // linkBadgeOf 会回退成「已连接 / 未连接」两态）。
+            ws: d.ws || null,
+            deliveryConfigured: Boolean(d.delivery && d.delivery.configured),
           })
         } catch (e) { /* 状态面板不是关键路径 */ }
       }, [])
@@ -584,8 +697,13 @@ window.__ModuleLoader__.load({
         try {
           // 提示词走专用端点（prompt.system 不在 settings 白名单里）。
           // 它必须先成功：失败就直接中止，绝不报「已保存」这种假成功。
-          if (promptSystem !== promptBaseline) {
-            await postJson('/prompt', { system: promptSystem })
+          // 两套提示词各存各的：只提交真的有改动的那几套。
+          const promptJobs = PROMPT_TABS.filter(function (t) {
+            const slot = prompts[t.key] || emptyPromptSlot()
+            return slot.system !== slot.baseline
+          })
+          for (const t of promptJobs) {
+            await postJson('/prompt' + promptQuery(t.key), { kind: t.key, system: (prompts[t.key] || {}).system || '' })
           }
           const res = await postJson('/settings', { settings: form })
           const dropped = res.droppedFields || []
@@ -602,7 +720,7 @@ window.__ModuleLoader__.load({
         } finally {
           if (aliveRef.current) setSaving(false)
         }
-      }, [form, promptSystem, promptBaseline, flash, loadAll, refreshStatus])
+      }, [form, prompts, flash, loadAll, refreshStatus])
 
       const reset = useCallback(async function () {
         if (!window.confirm('清空设置页保存的所有覆盖，回到 cordis.patch.yml 里的初始值？')) return
@@ -667,24 +785,38 @@ window.__ModuleLoader__.load({
         }
       }, [flash])
 
-      const promptDirty = promptSystem !== promptBaseline
+      /** 改某套提示词的草稿：只动这一套，切 tab 不会丢另一套的未保存内容。 */
+      const setPromptText = useCallback(function (kind, text) {
+        setPrompts(function (prev) {
+          const out = Object.assign({}, prev)
+          out[kind] = Object.assign({}, out[kind] || emptyPromptSlot(), { system: String(text == null ? '' : text) })
+          return out
+        })
+      }, [])
+
+      const dirtyPromptKinds = PROMPT_TABS.filter(function (t) {
+        const slot = prompts[t.key] || emptyPromptSlot()
+        return slot.system !== slot.baseline
+      }).map(function (t) { return t.key })
+      const promptDirty = dirtyPromptKinds.length > 0
       const anyDirty = dirty || promptDirty
 
-      /** 恢复默认提示词：二次确认后调 /prompt/reset。 */
+      /** 恢复默认提示词：只重置当前 tab 那一套，二次确认后调 /prompt/reset?kind=。 */
       const resetPrompt = useCallback(async function () {
-        if (!window.confirm('恢复为内置默认提示词？当前自定义内容会被清空。')) return
+        const kind = promptTab
+        const label = kind === 'detail' ? 'AI 精细版' : '普通总结'
+        if (!window.confirm('把「' + label + '」恢复为内置默认提示词？这一套的自定义内容会被清空，另一套不受影响。')) return
         setBusy('prompt')
         try {
-          const d = await postJson('/prompt/reset', {})
-          flash('已恢复内置默认提示词')
-          await loadPrompt()
-          if (d && d.system) setPromptSystem(d.system)
+          await postJson('/prompt/reset' + promptQuery(kind), { kind })
+          flash('已恢复内置默认提示词（' + label + '）')
+          await loadPrompt(kind)
         } catch (error) {
           flash(error.message || String(error), 'error')
         } finally {
           if (aliveRef.current) setBusy('')
         }
-      }, [flash, loadPrompt])
+      }, [flash, loadPrompt, promptTab])
 
       /** 重新生成网页服务密钥：明文只回这一次，提示用户立刻保存。 */
       const regenToken = useCallback(async function () {
@@ -713,6 +845,19 @@ window.__ModuleLoader__.load({
 
       const wsOk = Boolean(status && status.wsConnected)
       const errs = (status && status.configErrors) || []
+      // F-3：连接态徽章与每秒递减的重连倒计时。
+      const linkNow = useLinkTick(Boolean(status && status.ws && status.ws.reconnecting))
+      const linkBadge = linkBadgeOf(status && status.ws, linkNow)
+      // E-4：投递目标为空时给一行提示，不报错、不阻塞保存。
+      const friendsConfigured = Array.isArray(form.delivery && form.delivery.friends)
+        ? form.delivery.friends.length > 0
+        : false
+      // D-8：当前 tab 对应的那套提示词槽位。
+      const promptTabDef = PROMPT_TABS.filter(function (t) { return t.key === promptTab })[0] || PROMPT_TABS[0]
+      const promptSlot = prompts[promptTab] || emptyPromptSlot()
+      const promptText = promptSlot.system || ''
+      const promptMax = promptSlot.maxChars || 20000
+      const promptMin = promptSlot.minChars || 10
       // 群号 → 群名映射：优先协议端群列表，退回运行态里已见过的群名。
       const groupMap = {}
       ;(groups.available || []).forEach(function (g) { groupMap[String(g.groupId)] = g.groupName || String(g.groupId) })
@@ -754,8 +899,8 @@ window.__ModuleLoader__.load({
           badges: h('span', { className: 'qqd-inline' },
             h('span', { className: 'qqd-badge', 'data-kind': status && status.started ? 'ok' : 'off' },
               status && status.started ? '已启动' : '未启动'),
-            h('span', { className: 'qqd-badge', 'data-kind': wsOk ? 'ok' : 'warn' },
-              wsOk ? '协议端已连接' : '协议端未连接'),
+            h('span', { className: 'qqd-badge', 'data-kind': linkBadge.kind, title: linkBadge.title || undefined },
+              linkBadge.text),
           ),
           open: Boolean(openCards.status),
           onToggle: function () { toggleCard('status') },
@@ -928,28 +1073,44 @@ window.__ModuleLoader__.load({
           title: 'AI 提示词',
           badges: promptDirty
             ? h('span', { className: 'qqd-badge', 'data-kind': 'warn' }, '未保存')
-            : (promptSystem && promptSystem !== promptMeta.defaultPrompt
-                ? h('span', { className: 'qqd-badge', 'data-kind': 'ok' }, '自定义')
-                : h('span', { className: 'qqd-badge' }, '内置默认')),
+            : (promptSlot.isDefault
+                ? h('span', { className: 'qqd-badge' }, '内置默认')
+                : h('span', { className: 'qqd-badge', 'data-kind': 'ok' }, '自定义')),
           open: Boolean(openCards.prompt),
           onToggle: function () { toggleCard('prompt') },
         },
-          h('div', { className: 'qqd-hint' }, '送给模型的 system prompt。留空即使用内置默认；修改后保存会热重建运行态，不需要重启 DSH。'),
-          promptMeta.error
-            ? h('div', { className: 'qqd-tip', 'data-kind': 'error' }, '提示词接口不可用（后端仍是旧代码）：' + promptMeta.error)
+          // 两套提示词各一个 tab：切 tab 只换展示，未保存的草稿留在各自槽位里。
+          h('div', { className: 'qqd-tabs', role: 'tablist' },
+            PROMPT_TABS.map(function (t) {
+              const slot = prompts[t.key] || emptyPromptSlot()
+              const changed = slot.system !== slot.baseline
+              return h('button', {
+                key: t.key,
+                className: 'qqd-tab',
+                type: 'button',
+                role: 'tab',
+                'data-active': promptTab === t.key ? 'true' : 'false',
+                'aria-selected': promptTab === t.key ? 'true' : 'false',
+                onClick: function () { setPromptTab(t.key) },
+              }, t.label + (changed ? ' ·未保存' : ''))
+            }),
+          ),
+          h('div', { className: 'qqd-hint' }, promptTabDef.hint),
+          promptSlot.error
+            ? h('div', { className: 'qqd-tip', 'data-kind': 'error' }, '提示词接口不可用（后端仍是旧代码）：' + promptSlot.error)
             : null,
           h('textarea', {
             className: 'qqd-textarea',
-            value: promptSystem,
+            value: promptText,
             spellCheck: false,
-            placeholder: '留空 = 使用内置默认提示词。点下方「查看默认提示词」可参照默认内容改写。',
-            onChange: function (e) { setPromptSystem(e.target.value) },
+            placeholder: promptTabDef.placeholder,
+            onChange: function (e) { setPromptText(promptTab, e.target.value) },
           }),
           h('div', { className: 'qqd-inline' },
             h('span', {
               className: 'qqd-counter',
-              'data-kind': promptSystem.length > (promptMeta.maxChars || 20000) ? 'over' : 'ok',
-            }, promptSystem.length + ' / ' + (promptMeta.maxChars || 20000)),
+              'data-kind': promptText.length > promptMax ? 'over' : 'ok',
+            }, promptText.length + ' / ' + promptMax),
             h('span', { className: 'qqd-grow' }),
             h('button', {
               className: 'qqd-btn', type: 'button',
@@ -962,11 +1123,11 @@ window.__ModuleLoader__.load({
             }, busy === 'prompt' ? '恢复中…' : '恢复默认'),
           ),
           showDefault
-            ? h('div', { className: 'qqd-pre' }, promptMeta.defaultPrompt || '（未取到默认提示词）')
+            ? h('div', { className: 'qqd-pre' }, promptSlot.defaultPrompt || '（未取到默认提示词）')
             : null,
-          promptSystem.length > 0 && promptSystem.length < (promptMeta.minChars || 10)
+          promptText.length > 0 && promptText.length < promptMin
             ? h('div', { className: 'qqd-tip', 'data-kind': 'error' },
-                '提示词太短：至少 ' + (promptMeta.minChars || 10) + ' 字符，留空则表示恢复默认。')
+                '提示词太短：至少 ' + promptMin + ' 字符，留空则表示恢复默认。')
             : null,
         ),
 
@@ -1047,7 +1208,12 @@ window.__ModuleLoader__.load({
 
         h(Card, {
           title: '投递目标（QQ 私聊）',
-          badges: h('span', { className: 'qqd-badge' }, form.dryRun ? '当前预演，不会真发' : '必填'),
+          // E-4：friends 不再是必填项——不配也能跑，只是总结不发 QQ。
+          badges: h('span', { className: 'qqd-inline' },
+            h('span', { className: 'qqd-badge', 'data-kind': friendsConfigured ? '' : 'warn' },
+              friendsConfigured ? '已配置 ' + form.delivery.friends.length + ' 人' : '未配置'),
+            form.dryRun ? h('span', { className: 'qqd-badge' }, '当前预演，不会真发') : null,
+          ),
           open: Boolean(openCards.delivery),
           onToggle: function () { toggleCard('delivery') },
         },
@@ -1061,6 +1227,11 @@ window.__ModuleLoader__.load({
             emptyText: '尚未添加接收人',
             placeholder: '输入 QQ 号后回车',
           }),
+          // E-4：没配接收人不是错误，只是一条提示；不报错、不阻塞保存。
+          !friendsConfigured
+            ? h('div', { className: 'qqd-tip', 'data-kind': 'warn' },
+                '（未配置投递目标：总结只保存在网页端与历史记录，不会发 QQ）')
+            : null,
           friends.error ? h('div', { className: 'qqd-note' }, '拉取好友列表失败：' + friends.error) : null,
           h(Field, { label: '单条消息最大字数', hint: '超过则按行切分成多条发送。默认 1800。' },
             h(NumInput, { value: form.delivery && form.delivery.maxCharsPerMessage, min: 200, max: 4000, step: 100, onChange: function (v) { patch('delivery.maxCharsPerMessage', v) } }),
@@ -1098,7 +1269,14 @@ window.__ModuleLoader__.load({
             onClick: function () {
               setForm(JSON.parse(baseline))
               setDirty(false)
-              setPromptSystem(promptBaseline)
+              // 两套提示词一起回滚到各自的已保存值。
+              setPrompts(function (prev) {
+                const out = {}
+                Object.keys(prev).forEach(function (k) {
+                  out[k] = Object.assign({}, prev[k], { system: prev[k].baseline })
+                })
+                return out
+              })
               flash('已撤销未保存的改动')
             },
           }, '撤销改动'),

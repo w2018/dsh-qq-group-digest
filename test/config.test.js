@@ -30,6 +30,26 @@ test('resolveConfig dryRun 时允许 friends 为空', () => {
   assert.equal(errors.filter((e) => e.includes('delivery.friends')).length, 0)
 })
 
+// v0.5.0 方案 E.1：投递目标为空不再算配置错误——网页端与历史记录本身就是可用产物，
+// 不能因为没有好友就让插件 startError、管线不启动。
+test('resolveConfig 非 dryRun 时 friends 为空也不报错', () => {
+  const { config, errors } = resolveConfig({ listen: { groups: ['1'] }, delivery: { friends: [] }, dryRun: false })
+  assert.deepEqual(errors, [])
+  assert.deepEqual(config.delivery.friends, [])
+})
+
+test('resolveConfig friends 缺省（完全没有 delivery 段）也不报错', () => {
+  const { config, errors } = resolveConfig({ listen: { groups: ['1'] } })
+  assert.deepEqual(errors, [])
+  assert.deepEqual(config.delivery.friends, [])
+})
+
+test('resolveConfig friends 全被过滤成空数组后仍不报错', () => {
+  const { config, errors } = resolveConfig({ listen: { groups: ['1'] }, delivery: { friends: ['', null, '  ', ''] } })
+  assert.deepEqual(errors, [])
+  assert.deepEqual(config.delivery.friends, [])
+})
+
 test('resolveConfig 按群覆盖阈值', () => {
   const { config } = resolveConfig({
     listen: { groups: ['1', '2'] },
@@ -170,6 +190,51 @@ test('resolveConfig prompt.system 超过 20000 字符截断并报错', () => {
   assert.deepEqual(ok.errors, [])
 })
 
+test('resolveConfig model.maxTokens 默认 2048，detailMaxTokens 默认 4096', () => {
+  const { config } = resolve()
+  assert.equal(config.model.maxTokens, 2048)
+  assert.equal(config.model.detailMaxTokens, 4096)
+})
+
+test('resolveConfig maxTokens / detailMaxTokens 按各自区间 clamp', () => {
+  assert.equal(resolve({ model: { maxTokens: 1 } }).config.model.maxTokens, 64)
+  assert.equal(resolve({ model: { maxTokens: 999999 } }).config.model.maxTokens, 32000)
+  assert.equal(resolve({ model: { maxTokens: 100 } }).config.model.maxTokens, 100)
+  assert.equal(resolve({ model: { detailMaxTokens: 1 } }).config.model.detailMaxTokens, 512)
+  assert.equal(resolve({ model: { detailMaxTokens: 999999 } }).config.model.detailMaxTokens, 32000)
+  assert.equal(resolve({ model: { detailMaxTokens: 3000 } }).config.model.detailMaxTokens, 3000)
+})
+
+test('resolveConfig prompt.detailSystem 默认为空串（= 用内置默认）', () => {
+  assert.equal(resolve().config.prompt.detailSystem, '')
+})
+
+test('resolveConfig prompt.detailSystem 与 system 同规则：字符串化 + trim', () => {
+  assert.equal(resolve({ prompt: { detailSystem: '  自定义精细版  ' } }).config.prompt.detailSystem, '自定义精细版')
+  assert.equal(resolve({ prompt: { detailSystem: 123 } }).config.prompt.detailSystem, '123')
+  assert.equal(resolve({ prompt: { detailSystem: null } }).config.prompt.detailSystem, '')
+})
+
+test('resolveConfig prompt.detailSystem 超过 20000 字符截断并报错', () => {
+  const long = 'x'.repeat(20001)
+  const { config, errors } = resolve({ prompt: { detailSystem: long } })
+  assert.equal(config.prompt.detailSystem.length, 20000)
+  assert.ok(errors.includes('prompt.detailSystem 超过 20000 字符'))
+
+  const ok = resolve({ prompt: { detailSystem: 'y'.repeat(20000) } })
+  assert.equal(ok.config.prompt.detailSystem.length, 20000)
+  assert.deepEqual(ok.errors, [])
+})
+
+test('prompt.system 与 prompt.detailSystem 互相独立', () => {
+  const { config, errors } = resolve({
+    prompt: { system: '普通版', detailSystem: 'x'.repeat(20001) },
+  })
+  assert.equal(config.prompt.system, '普通版')
+  assert.equal(config.prompt.detailSystem.length, 20000)
+  assert.deepEqual(errors, ['prompt.detailSystem 超过 20000 字符'])
+})
+
 test('resolveConfig summary.aiDetail 默认 false，只认严格 true', () => {
   assert.equal(resolve().config.summary.aiDetail, false)
   assert.equal(resolve({ summary: { aiDetail: true } }).config.summary.aiDetail, true)
@@ -189,9 +254,16 @@ test('EDITABLE_FIELDS 收录 httpServer.* 与 summary.aiDetail，但不含 promp
   ]) {
     assert.ok(paths.includes(path), path + ' 必须在可编辑白名单里')
   }
-  // prompt.system 走单独端点，避免通用保存流程误清空
+  // prompt.system / prompt.detailSystem 走单独端点，避免通用保存流程误清空
   assert.ok(!paths.includes('prompt.system'))
+  assert.ok(!paths.includes('prompt.detailSystem'))
   assert.ok(!paths.includes('httpServer.token'))
+})
+
+test('EDITABLE_FIELDS 收录 model.detailMaxTokens', () => {
+  const paths = EDITABLE_FIELDS.map(([path]) => path)
+  assert.ok(paths.includes('model.maxTokens'))
+  assert.ok(paths.includes('model.detailMaxTokens'))
 })
 
 test('sanitizeOverride 保留 httpServer 字段并丢弃 token / prompt.system', () => {
@@ -211,4 +283,14 @@ test('sanitizeOverride 保留 httpServer 字段并丢弃 token / prompt.system',
   assert.equal(got.override.prompt, undefined)
   assert.ok(got.dropped.includes('httpServer.token'))
   assert.ok(got.dropped.includes('prompt.system'))
+})
+
+test('sanitizeOverride 丢弃 prompt.detailSystem 但保留 model.detailMaxTokens', () => {
+  const got = sanitizeOverride({
+    prompt: { detailSystem: '自定义精细版' },
+    model: { detailMaxTokens: 5000 },
+  })
+  assert.equal(got.override.prompt, undefined)
+  assert.ok(got.dropped.includes('prompt.detailSystem'))
+  assert.equal(got.override.model.detailMaxTokens, 5000)
 })

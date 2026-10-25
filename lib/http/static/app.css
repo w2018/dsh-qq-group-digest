@@ -1436,6 +1436,47 @@ a:hover { text-decoration: underline; }
 }
 
 
+
+/* ── 标签页（双提示词：普通总结 / AI 精细版） ──────────────── */
+
+.qd-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--qd-radius-sm);
+  background: var(--qd-bg-sunken);
+  border: 1px solid var(--qd-border);
+  align-self: flex-start;
+  margin-bottom: 2px;
+}
+
+.qd-tab {
+  height: 26px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: calc(var(--qd-radius-sm) - 2px);
+  background: transparent;
+  color: var(--qd-text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.qd-tab:hover { color: var(--qd-text); }
+
+.qd-tab[data-active="true"] {
+  background: var(--qd-bg-elev);
+  color: var(--qd-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+}
+
+/* 未配置投递目标时的提示行：用警告色，但只是提示，不是错误。 */
+.qd-hint.warn { color: var(--qd-warn); }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }

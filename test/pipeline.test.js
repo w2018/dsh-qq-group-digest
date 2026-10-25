@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import { resolveConfig } from '../lib/config.js'
 import { Pipeline } from '../lib/pipeline.js'
+import { renderMembersSection } from '../lib/summarize/markdown.js'
 import { MessageStore } from '../lib/store/messages.js'
 import { makeEvent, baseConfig, fakeLlm, fakeCtx, fakeActions, silentLogger } from './helpers.js'
 
@@ -25,10 +26,12 @@ function buildPipeline(overrides, llm, actions) {
   return { pipeline, config, dir }
 }
 
-test('resolveConfig 缺 groups/friends 时报错', () => {
+test('resolveConfig 缺 groups 时报错（friends 允许为空）', () => {
   const { errors } = resolveConfig({ listen: { groups: [] }, delivery: { friends: [] } })
   assert.ok(errors.some((e) => e.includes('listen.groups')))
-  assert.ok(errors.some((e) => e.includes('delivery.friends')))
+  // v0.5.0 E.1：投递目标允许为空（网页端与历史记录本身就是可用产物），
+  // 空 friends 不能再让插件起不来，所以这里必须**不**报错。
+  assert.ok(!errors.some((e) => e.includes('delivery.friends')), 'friends 为空不该报错')
 })
 
 test('resolveConfig 归一化默认值与非法值', () => {
@@ -205,7 +208,7 @@ test('deliverEntries 单群失败只影响该群的历史回填', async () => {
   assert.equal(per.ok, true)
   pipeline.dispose()
 })
-test('aiDetail：AI 正文之后本地追加参与成员表，FOCUS 块被解析且不残留在正文里', async () => {
+test('aiDetail：FOCUS 块被解析回填 participants，正文不再追加成员表（v0.5.0 A）', async () => {
   const detail = [
     '# 100000001 · AI大模型交流',
     '',
@@ -240,16 +243,24 @@ test('aiDetail：AI 正文之后本地追加参与成员表，FOCUS 块被解析
   const entry = entries[0]
   assert.equal(entry.aiDetail, true, '应标记为 AI 精细版')
   assert.match(entry.md, /## 高频词条/, '保留 AI 正文')
-  assert.match(entry.md, /## 参与成员/, '本地必须追加成员表')
-  assert.match(entry.md, /\| 张三 \| 111 \| 1 \| 主张本地模型 \|/, '成员表带 FOCUS 重点')
-  assert.match(entry.md, /\| 李四 \| 222 \| 1 \| 支持先上云 \|/)
+  // v0.5.0：成员表已移出正文，任何成员表都不该出现在 entry.md 里。
+  assert.equal(entry.md.includes('参与成员'), false, '正文不该再拼成员表')
+  assert.equal(entry.md.includes('| 成员 | QQ |'), false, '正文不该有成员表表头')
+  // FOCUS 只在解析阶段用，注释块本身必须被剥掉。
   assert.ok(!entry.md.includes('FOCUS'), 'FOCUS 注释块不应残留在正文里')
+  // 重点信息改由 participants 携带，网页详情页与导出各自渲染。
   const zhang = entry.participants.find((x) => x.id === '111')
   assert.equal(zhang.focus, '主张本地模型')
+  const li = entry.participants.find((x) => x.id === '222')
+  assert.equal(li.focus, '支持先上云')
+  // 导出时才由 renderMembersSection 拼出这张表。
+  const section = renderMembersSection(entry.participants)
+  assert.match(section, /\| 张三 \| 111 \| 1 \| 主张本地模型 \|/)
+  assert.match(section, /\| 李四 \| 222 \| 1 \| 支持先上云 \|/)
   pipeline.dispose()
 })
 
-test('aiDetail 关闭时用本地渲染，成员表同样存在', async () => {
+test('aiDetail 关闭时用本地渲染，正文同样不含成员表', async () => {
   const llm = fakeLlm([{ text: '本批讨论了部署方案，结论是先用本地模型跑一轮。' }])
   const { pipeline } = buildPipeline({ batch: { threshold: 1, freezeGraceMs: 0 } }, llm)
   const entries = []
@@ -258,7 +269,9 @@ test('aiDetail 关闭时用本地渲染，成员表同样存在', async () => {
   await new Promise((r) => setTimeout(r, 150))
   assert.equal(entries.length, 1)
   assert.equal(entries[0].aiDetail, false)
-  assert.match(entries[0].md, /## 三、参与成员/)
+  // 本地渲染路径也走「正文三节、无成员表」的同一套口径。
+  assert.match(entries[0].md, /## 三、投递状态/)
+  assert.equal(entries[0].md.includes('参与成员'), false)
   pipeline.dispose()
 })
 
@@ -282,5 +295,83 @@ test('群名落进持久化群名表，status 与 groupNameOf 都能取到', asy
   assert.equal(names.get('100000001'), '测试群名')
   assert.equal(pipeline.groupNameOf('100000001'), '测试群名')
   assert.equal(pipeline.status().groupNames['100000001'], '测试群名')
+  pipeline.dispose()
+})
+// ── v0.5.0 G：Pipeline 层的过滤计数 ───────────────────────────────
+
+test('G: Pipeline.dropReasons 按原因分别计数', async () => {
+  const { pipeline } = buildPipeline(
+    {
+      listen: {
+        groups: ['100000001'],
+        ignoreSelf: true,
+        keywords: ['广告'],
+        excludedSenders: { '100000001': ['666'] },
+      },
+    },
+    null,
+  )
+
+  // 各类丢弃各来一条
+  pipeline.handleEvent(makeEvent({ groupId: '999999', msgId: 'r1' }))          // group-not-listed
+  pipeline.handleEvent(makeEvent({ userId: 100000000, msgId: 'r2' }))         // self-message
+  pipeline.handleEvent(makeEvent({ userId: 666, msgId: 'r3' }))               // excluded-sender
+  pipeline.handleEvent(makeEvent({ text: '这里有广告', msgId: 'r4' }))         // keyword
+  const priv = Object.assign(makeEvent({ msgId: 'r5' }), { message_type: 'private' })
+  pipeline.handleEvent(priv)                                                  // message-type
+  pipeline.handleEvent({ post_type: 'meta_event', meta_event_type: 'heartbeat' }) // post-type
+  // 一条正常的，不该进 dropReasons
+  pipeline.handleEvent(makeEvent({ msgId: 'r6', text: '正常讨论' }))
+
+  const status = pipeline.status()
+  const reasons = status.dropReasons
+  assert.equal(reasons['group-not-listed'], 1)
+  assert.equal(reasons['self-message'], 1)
+  assert.equal(reasons['excluded-sender'], 1)
+  assert.equal(reasons.keyword, 1)
+  assert.equal(reasons['message-type'], 1)
+  assert.equal(reasons['post-type'], 1)
+  assert.equal(status.stats.dropped, 6, '正常消息不计入 dropped')
+  assert.equal(status.stats.accepted, 1)
+  pipeline.dispose()
+})
+
+test('G: 同类丢弃累加而不是覆盖', () => {
+  const { pipeline } = buildPipeline({}, null)
+  for (let i = 0; i < 3; i += 1) pipeline.handleEvent(makeEvent({ groupId: '999999', msgId: 'acc' + i }))
+  for (let i = 0; i < 2; i += 1) pipeline.handleEvent(makeEvent({ userId: 100000000, msgId: 'self' + i }))
+  const reasons = pipeline.status().dropReasons
+  assert.equal(reasons['group-not-listed'], 3)
+  assert.equal(reasons['self-message'], 2)
+  pipeline.dispose()
+})
+
+test('G: dropReasons 的 key 是冒号前的段（message-type:private → message-type）', () => {
+  const { pipeline } = buildPipeline({}, null)
+  pipeline.handleEvent(Object.assign(makeEvent({ msgId: 'k1' }), { message_type: 'private' }))
+  pipeline.handleEvent(Object.assign(makeEvent({ msgId: 'k2' }), { message_type: 'discuss' }))
+  const reasons = pipeline.status().dropReasons
+  // 两种 message_type 归到同一个 key
+  assert.equal(reasons['message-type'], 2)
+  pipeline.dispose()
+})
+
+test('G: 关键词与 excludedSenders 都不命中时消息照常进入批次', async () => {
+  const llm = fakeLlm([{ text: '本批只讨论技术，没有被过滤的消息。' }])
+  const { pipeline } = buildPipeline(
+    {
+      listen: { groups: ['100000001'], keywords: ['广告'], excludedSenders: { '100000001': ['666'] } },
+      batch: { threshold: 2, freezeGraceMs: 0 },
+    },
+    llm,
+  )
+  // msgId 必须是数字：makeEvent 内部会 Number(msgId)，非数字会退化成 NaN，
+  // 两条消息的 dedupKey 撞车而被误判成重复。
+  pipeline.handleEvent(makeEvent({ msgId: '9001', realSeq: 9001, text: '向量检索怎么做' }))
+  pipeline.handleEvent(makeEvent({ msgId: '9002', realSeq: 9002, text: '用 embedding 召回' }))
+  await new Promise((r) => setTimeout(r, 100))
+  assert.equal(pipeline.stats.dropped, 0)
+  assert.equal(pipeline.stats.accepted, 2)
+  assert.equal(llm.calls.length, 1)
   pipeline.dispose()
 })

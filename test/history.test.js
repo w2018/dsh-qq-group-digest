@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { SummaryHistory } from '../lib/store/history.js'
+import { SummaryHistory, stripMembersSection } from '../lib/store/history.js'
 
 const tmpDirs = []
 
@@ -225,6 +225,111 @@ test('P4 向后兼容：旧存档缺新字段时读取不报错，按空处理',
   hist.append('1', { text: '新版总结', at: 1700000000, participants: [{ id: '9', name: '甲', count: 1 }], aiDetail: true })
   assert.equal(hist.load('1').length, 2)
   assert.equal(hist.latest('1').aiDetail, true)
+})
+
+// ── v0.5.0：旧存档里的成员表在 load 时剥离 ─────────────────
+
+const LEGACY_MD = [
+  '# 100000001 · AI大模型交流',
+  '',
+  '> 2026-10-25 18:00–18:06 · 33 条消息 · 6 位发言人 · workbuddy/deepseek-v4.1-flash',
+  '',
+  '## 一、本批主线',
+  '本批主线是讨论部署方式。',
+  '',
+  '## 二、要点',
+  '【王五】主张本地模型。',
+  '',
+  '## 三、参与成员',
+  '| 成员 | QQ | 发言数 | 本次重点 |',
+  '| :--- | :--- | ---: | :--- |',
+  '| 王五 | 123456 | 7 | 主张本地模型 |',
+  '',
+  '## 四、投递状态',
+  '- 状态：成功',
+  '- 投递成功：2 人 / 失败：0 人',
+].join('\n')
+
+test('stripMembersSection 剥离「## 三、参与成员」并把投递状态改回第三节', () => {
+  const out = stripMembersSection(LEGACY_MD)
+  assert.equal(out.includes('参与成员'), false)
+  assert.equal(out.includes('| 成员 | QQ |'), false)
+  assert.equal(out.includes('## 四、投递状态'), false)
+  assert.match(out, /## 三、投递状态/)
+  // 正文与 meta 必须原样保留
+  assert.match(out, /^# 100000001 · AI大模型交流/)
+  assert.match(out, /> 2026-10-25 18:00–18:06 · 33 条消息 · 6 位发言人 · workbuddy\/deepseek-v4\.1-flash/)
+  assert.match(out, /## 一、本批主线\n本批主线是讨论部署方式。/)
+  assert.match(out, /## 二、要点\n【王五】主张本地模型。/)
+  assert.match(out, /- 状态：成功/)
+})
+
+test('stripMembersSection 也认「## 参与成员」表头（pipeline 追加过的那份）', () => {
+  const md = ['# 标题', '', '## 要点', '正文一行', '', '## 参与成员', '', '| 成员 | QQ | 发言数 | 本次重点 |', '| :--- | :--- | ---: | :--- |', '| 李四 | 9 | 3 | — |', ''].join('\n')
+  const out = stripMembersSection(md)
+  assert.equal(out.includes('## 参与成员'), false)
+  assert.equal(out.includes('| 李四 |'), false)
+  assert.match(out, /## 要点\n正文一行/)
+})
+
+test('stripMembersSection 遇到小节里混有正文时不剥离（保守）', () => {
+  const md = ['## 三、参与成员', '| 成员 | QQ | 发言数 |', '这里其实是一段正文说明', ''].join('\n')
+  assert.equal(stripMembersSection(md), md)
+})
+
+test('stripMembersSection 表头不完全相等时不剥离', () => {
+  const md = ['## 参与成员（旧）', '| 成员 | QQ | 发言数 |', ''].join('\n')
+  assert.equal(stripMembersSection(md), md)
+  const md2 = ['## 三、参与成员列表', '| 成员 | QQ | 发言数 |', ''].join('\n')
+  assert.equal(stripMembersSection(md2), md2)
+})
+
+test('stripMembersSection 空表「（未记录）」行也算表格，可剥离', () => {
+  const md = ['## 三、参与成员', '| 成员 | QQ | 发言数 | 本次重点 |', '| :--- | :--- | ---: | :--- |', '| （未记录） | — | — | — |', '', '## 四、投递状态', '- 状态：成功'].join('\n')
+  const out = stripMembersSection(md)
+  assert.equal(out.includes('参与成员'), false)
+  assert.match(out, /## 三、投递状态/)
+})
+
+test('stripMembersSection 小节在文末（后面没有 ## 标题）也能剥离', () => {
+  const md = ['# 标题', '', '## 参与成员', '| 成员 | QQ | 发言数 |', '| :--- | :--- | ---: |', '| 甲 | 1 | 2 |'].join('\n')
+  const out = stripMembersSection(md)
+  assert.equal(out.includes('参与成员'), false)
+  assert.equal(out.includes('| 甲 |'), false)
+  assert.match(out, /^# 标题/)
+})
+
+test('stripMembersSection 没有成员小节时原样返回（同一引用语义）', () => {
+  const md = '# 标题\n\n## 一、本批主线\n正文'
+  assert.equal(stripMembersSection(md), md)
+  assert.equal(stripMembersSection(''), '')
+  assert.equal(stripMembersSection(null), '')
+  assert.equal(stripMembersSection(undefined), '')
+})
+
+test('load 读盘时剥离旧存档里的成员表（内存中处理）', () => {
+  const root = makeRoot()
+  const legacy = {
+    groupId: '100000001',
+    entries: [{ at: 1699990000, batchId: 'old-1', count: 33, ok: true, text: '正文', md: LEGACY_MD, delivered: 2, failed: 0 }],
+  }
+  writeFileSync(join(root, '100000001.json'), JSON.stringify(legacy), 'utf8')
+
+  const hist = new SummaryHistory(root)
+  const entry = hist.latest('100000001')
+  assert.equal(entry.md.includes('参与成员'), false)
+  assert.match(entry.md, /## 三、投递状态/)
+  // 不强制回写：磁盘上仍是旧内容
+  const onDisk = JSON.parse(readFileSync(join(root, '100000001.json'), 'utf8'))
+  assert.match(onDisk.entries[0].md, /## 三、参与成员/)
+})
+
+test('append 原样存 md（剥离只发生在读盘路径，不篡改写入内容）', () => {
+  const hist = new SummaryHistory(makeRoot())
+  const item = hist.append('1', { text: '正文', md: '# 标题\n\n## 三、投递状态\n- 状态：成功', at: 1700000000 })
+  assert.equal(item.md, '# 标题\n\n## 三、投递状态\n- 状态：成功')
+  // 新版本 pipeline 写入的 md 本就不含成员表，所以这条路径天然干净
+  assert.equal(hist.latest('1').md.includes('参与成员'), false)
 })
 
 test('P4 md 单独上限 20000，超了截断并加标记；text 上限仍是 6000', () => {

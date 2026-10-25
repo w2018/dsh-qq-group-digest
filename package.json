@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-group-digest",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "DeepSeek-Harness 插件：监听指定 QQ 群消息，按阈值批次调用 DSH 已配置模型生成总结，并按群组织后私聊推送给指定好友。",
   "type": "module",
   "main": "index.js",

@@ -142,9 +142,9 @@ test('列表与详情的 groupName 从群名表补齐，群名表为空时回退
     const detail = await getJson(base, '/api/summaries/100000001/b1')
     assert.equal(detail.status, 200)
     assert.equal(detail.json.item.groupName, '群名表里的新群名')
-    // 旧记录没有 md，详情要即时渲染一份，且带参与成员表
+    // 旧记录没有 md，详情要即时渲染一份；v0.5.0 起正文不含成员表。
     assert.match(detail.json.item.md, /^# 100000001/)
-    assert.match(detail.json.item.md, /\| 张三 \| 111 \| 7 \| 主张本地模型 \|/)
+    assert.equal(detail.json.item.md.includes('参与成员'), false, '详情正文不再带成员表')
   })
 })
 
@@ -181,6 +181,9 @@ test('POST /api/summaries/export 多条用 --- 分隔并带来源注释', async 
     assert.match(r.json.markdown, /<!-- 100000001 b1 -->/)
     assert.match(r.json.markdown, /<!-- 100000001 b2 -->/)
     assert.equal(r.json.markdown.split('\n\n---\n\n').length, 2, '两条之间恰好一个分隔符')
+    // 导出时才追加成员表，且整份导出里每条只追加一次。
+    assert.equal(r.json.markdown.split('参与成员').length - 1, 2, '每条记录各一份成员表')
+    assert.match(r.json.markdown, /\| 张三 \| 111 \| 7 \| 主张本地模型 \|/)
     assert.ok(r.json.markdown.indexOf('正文一') < r.json.markdown.indexOf('正文二'), '按请求顺序')
   })
 })
