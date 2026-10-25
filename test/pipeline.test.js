@@ -205,3 +205,82 @@ test('deliverEntries 单群失败只影响该群的历史回填', async () => {
   assert.equal(per.ok, true)
   pipeline.dispose()
 })
+test('aiDetail：AI 正文之后本地追加参与成员表，FOCUS 块被解析且不残留在正文里', async () => {
+  const detail = [
+    '# 100000001 · AI大模型交流',
+    '',
+    '## 高频词条',
+    '- ==deepseek==（出现 3 次）：本地模型选型',
+    '',
+    '## 要点',
+    '【张三】主张用 ==本地模型==，@@不建议上云@@。',
+    '',
+    '## 结论',
+    '先用本地模型跑一轮再评估。',
+    '',
+    '<!--FOCUS',
+    '{"111":"主张本地模型","222":"支持先上云"}',
+    '-->',
+  ].join('\n')
+  const llm = fakeLlm([
+    { text: '本批讨论了本地模型与上云的取舍，结论是先用本地模型跑一轮再评估效果。' },
+    { text: detail },
+  ])
+  const { pipeline } = buildPipeline(
+    { batch: { threshold: 2, freezeGraceMs: 0 }, summary: { aiDetail: true } },
+    llm,
+  )
+  const entries = []
+  pipeline.onGroupSummary = async (e) => entries.push(e)
+  pipeline.handleEvent(makeEvent({ msgId: '1', realSeq: 1, text: 'a', userId: 111, nickname: '张三' }))
+  pipeline.handleEvent(makeEvent({ msgId: '2', realSeq: 2, text: 'b', userId: 222, nickname: '李四' }))
+  await new Promise((r) => setTimeout(r, 250))
+
+  assert.equal(entries.length, 1)
+  const entry = entries[0]
+  assert.equal(entry.aiDetail, true, '应标记为 AI 精细版')
+  assert.match(entry.md, /## 高频词条/, '保留 AI 正文')
+  assert.match(entry.md, /## 参与成员/, '本地必须追加成员表')
+  assert.match(entry.md, /\| 张三 \| 111 \| 1 \| 主张本地模型 \|/, '成员表带 FOCUS 重点')
+  assert.match(entry.md, /\| 李四 \| 222 \| 1 \| 支持先上云 \|/)
+  assert.ok(!entry.md.includes('FOCUS'), 'FOCUS 注释块不应残留在正文里')
+  const zhang = entry.participants.find((x) => x.id === '111')
+  assert.equal(zhang.focus, '主张本地模型')
+  pipeline.dispose()
+})
+
+test('aiDetail 关闭时用本地渲染，成员表同样存在', async () => {
+  const llm = fakeLlm([{ text: '本批讨论了部署方案，结论是先用本地模型跑一轮。' }])
+  const { pipeline } = buildPipeline({ batch: { threshold: 1, freezeGraceMs: 0 } }, llm)
+  const entries = []
+  pipeline.onGroupSummary = async (e) => entries.push(e)
+  pipeline.handleEvent(makeEvent({ msgId: '1', realSeq: 1, text: 'a' }))
+  await new Promise((r) => setTimeout(r, 150))
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].aiDetail, false)
+  assert.match(entries[0].md, /## 三、参与成员/)
+  pipeline.dispose()
+})
+
+test('群名落进持久化群名表，status 与 groupNameOf 都能取到', async () => {
+  const { GroupNameStore } = await import('../lib/store/group-names.js')
+  const llm = fakeLlm([{ text: '本批讨论了群名同步，结论是没问题。' }])
+  const { config } = resolveConfig(baseConfig({ batch: { threshold: 100, freezeGraceMs: 0 } }))
+  const dir = mkdtempSync(join(tmpdir(), 'qqd-gn-'))
+  const names = new GroupNameStore(dir)
+  const pipeline = new Pipeline({
+    ctx: fakeCtx(llm),
+    config,
+    actions: fakeActions(0),
+    store: new MessageStore(dir),
+    groupNameStore: names,
+    logger: silentLogger,
+    outboxDir: dir,
+  })
+  pipeline.start()
+  pipeline.handleEvent(makeEvent({ msgId: '9', realSeq: 9, groupName: '测试群名', text: 'x' }))
+  assert.equal(names.get('100000001'), '测试群名')
+  assert.equal(pipeline.groupNameOf('100000001'), '测试群名')
+  assert.equal(pipeline.status().groupNames['100000001'], '测试群名')
+  pipeline.dispose()
+})

@@ -6,12 +6,12 @@
 
 DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维度报告
 
-[![version](https://img.shields.io/badge/version-v0.3.0-blue.svg)](#版本信息)
+[![version](https://img.shields.io/badge/version-v0.4.0-blue.svg)](#版本信息)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](#许可)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 [![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.2-7c5cff.svg)](https://github.com/deepseek-ai)
-[![releases](https://img.shields.io/badge/releases-v0.3.0-lightgrey.svg)](https://github.com/w2018/dsh-qq-group-digest/releases)
-[![tests](https://img.shields.io/badge/tests-215%20passing-brightgreen.svg)](#开发)
+[![releases](https://img.shields.io/badge/releases-v0.4.0-lightgrey.svg)](https://github.com/w2018/dsh-qq-group-digest/releases)
+[![tests](https://img.shields.io/badge/tests-241%20passing-brightgreen.svg)](#主要功能)
 
 [核心配套](#-核心配套luckylilliabot) · [版本信息](#版本信息) · [依赖](#依赖) · [安装使用](#安装使用) · [HTTP 网页服务](#-http-网页服务) · [主要功能](#主要功能) · [数据与目录](#数据与目录)
 
@@ -33,9 +33,9 @@ DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维�
 
 | 项 | 值 |
 | :--- | :--- |
-| 当前版本 | **v0.3.0** |
+| 当前版本 | **v0.4.0** |
 | 发布日期 | 2026-10-25 |
-| 最新发布 | [v0.3.0 · HTTP 网页服务](https://github.com/w2018/dsh-qq-group-digest/releases/tag/v0.3.0) |
+| 最新发布 | [v0.3.0 · HTTP 网页服务](https://github.com/w2018/dsh-qq-group-digest/releases/tag/v0.3.0)（v0.4.0 待发布） |
 
 ---
 
@@ -116,6 +116,9 @@ pnpm install
 | 📤 **报告投递** | **每个群单独一条 QQ 消息**（多群绝不合并且不会超长截断），单条超长按行分段、段间间隔防风控；单群失败不影响其它群，全部失败兜底写 `outbox/failed-*.md` |
 | 🌐 **HTTP 网页服务** | 可开关的独立端口（默认 1213）网页端：配置页 / 日志页 / 总结记录页，默认密钥登录，与 DSH 设置页并存互不影响 |
 | 📝 **总结记录（Markdown）** | 每群每次总结存一份完整 Markdown；网页端本地零依赖渲染，可切「AI 精细版」再调一次模型产出更详尽的长文 |
+| 🗂 **总结记录管理** | 按群分组折叠、AI/本地标识、行勾选批量导出 `.md` 与批量删除（二次确认），详情页可删单条 |
+| 🏷 **群名持久化** | 群名单独存 `group-names.json`，连接时自动灌入协议端群列表；报告与网页端一律显示「群名（群号）」，不再出现「未命名群」 |
+| ✨ **重点标记与高频词条** | AI 精细版固定「高频词条 → 要点 → 结论 → 待办」结构；`==文字==` 渲染背景高亮、`@@文字@@` 渲染强调色；成员表带 15 字内「本次重点」 |
 | 🧵 **历史上下文** | 每群 `summaries/<群号>.json` 存最近 20 条，每次总结附带此前 `historyCount` 条，避免重复叙述、丢关键结论 |
 | 🚫 **信息过滤** | 关键词模糊匹配（不区分大小写）与按群排除成员，命中的消息不计入总结，丢弃原因计入 `dropReasons` |
 | 🎛 **设置界面** | DSH 设置页与独立网页端都能改全部配置，保存即热生效；群进度 `[n/threshold]` 实时可见，状态与报告 5 秒自动刷新 |
@@ -143,7 +146,7 @@ pnpm install
 | :--- | :--- | :--- |
 | 配置页 | `/` | 与 DSH 设置页**功能完全一致**的九张卡片，另加 **AI 提示词编辑器**（可改写、可一键恢复内置默认） |
 | 日志页 | `/logs` | 级别 / 群号 / 关键字 / 时间范围筛选，SSE 实时推送，可导出 `.jsonl`；按天落盘，默认保留 7 天 |
-| 总结记录页 | `/summaries` | **重点**：按群分组，每条记录渲染成完整 Markdown 文档（标题 / 要点 / 参与成员表 / 投递状态），支持复制、下载 `.md`、看原始文本、上下条翻页 |
+| 总结记录页 | `/summaries` | **重点**：按群分组可折叠，每条记录渲染成完整 Markdown 文档（高频词条 / 要点 / 参与成员表 / 投递状态），AI 精细版带 `AI` 徽章；支持勾选批量导出 `.md`、批量删除、复制、下载、看原始文本、上下条翻页 |
 
 > 📄 **本地渲染 vs AI 精细版**
 > 默认用零依赖的本地渲染器把总结排成 Markdown，不额外调用模型、零成本。
@@ -174,7 +177,8 @@ pnpm install
 | 路径 | 内容 |
 | :--- | :--- |
 | `messages/<群号>/<日期>.jsonl` | 原始消息，`storage.keepDays` 到期清理 |
-| `summaries/<群号>.json` | 每群历史总结，删掉即清空该群记忆 |
+| `summaries/<群号>.json` | 每群历史总结（含 AI 精细版 md 与成员发言重点），删掉即清空该群记忆 |
+| `group-names.json` | 群号 → 群名映射，连接协议端时自动补齐；删掉会在下次连接后重建 |
 | `outbox/` | dryRun 预演与发送失败的兜底报告（多群时每群一个文件） |
 | `logs/<日期>.jsonl` | 网页日志页的数据源，按天落盘，默认保留 7 天 |
 | `settings.json` | 设置页保存的覆盖配置（含提示词与网页服务密钥）；删掉即回到 `cordis.patch.yml` 初始值 |
@@ -192,7 +196,7 @@ dsh-qq-group-digest/
 │   ├── http/             # 独立网页服务：server / auth / api + static 四页
 │   └── summarize/        # 提示词、Markdown 渲染、总结调用
 ├── doc/                  # 版本变更记录 + 开发计划
-└── test/                 # 215 个用例，node:test，零依赖
+└── test/                 # 241 个用例，node:test，零依赖
 ```
 
 </details>

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { renderDetailedMarkdown, MAX_MD } from '../lib/summarize/markdown.js'
+import { renderDetailedMarkdown, renderMembersSection, MAX_MD } from '../lib/summarize/markdown.js'
 
 function baseEntry(overrides) {
   return Object.assign(
@@ -32,7 +32,9 @@ test('renderDetailedMarkdown 正常渲染出四段结构与表格', () => {
   assert.match(md, /^> .*7 条消息 · 2 位发言人 · workbuddy\/deepseek-v4\.1-flash/m)
   assert.match(md, /## 一、本批主线\n本批主线是讨论 deepseek 的部署方式。/)
   assert.match(md, /## 二、要点\n【王五】主张先用本地模型，【张三】同意。/)
-  assert.match(md, /## 三、参与成员\n\| 成员 \| QQ \| 发言数 \|\n\| :--- \| :--- \| ---: \|/)
+  // 成员表列数后续可能扩展（如「本次重点」），断言只锚定前三列，避免加列就假失败。
+  assert.match(md, /## 三、参与成员\n\| 成员 \| QQ \| 发言数 \|/)
+  assert.match(md, /\| :--- \| :--- \| ---: \|/)
   assert.match(md, /\| 王五 \| 123456 \| 7 \|/)
   assert.match(md, /\| 张三 \| 654321 \| 3 \|/)
   assert.match(md, /## 四、投递状态/)
@@ -94,6 +96,33 @@ test('表格单元格里的竖线与换行被转义，不会撑破列', () => {
     baseEntry({ participants: [{ id: '1', name: 'a|b\nc', count: 2 }] }),
   )
   assert.match(md, /\| a\\\|b c \| 1 \| 2 \|/)
+})
+
+test('成员表带上「本次重点」列，focus 为空时填 —', () => {
+  const md = renderDetailedMarkdown(
+    baseEntry({
+      participants: [
+        { id: '1', name: '王五', count: 5, focus: '主张本地模型' },
+        { id: '2', name: '张三', count: 2 },
+      ],
+    }),
+  )
+  assert.match(md, /\| 成员 \| QQ \| 发言数 \| 本次重点 \|/)
+  assert.match(md, /\| 王五 \| 1 \| 5 \| 主张本地模型 \|/)
+  assert.match(md, /\| 张三 \| 2 \| 2 \| — \|/)
+})
+
+test('renderMembersSection 可单独追加到 AI 正文之后', () => {
+  const section = renderMembersSection([{ id: '9', name: '李四', count: 3, focus: '提了三个问题' }])
+  assert.match(section, /^\n## 参与成员\n/)
+  assert.match(section, /\| 李四 \| 9 \| 3 \| 提了三个问题 \|/)
+  assert.ok(section.endsWith('\n'))
+})
+
+test('renderMembersSection 空列表给出（未记录）而不是空白表格', () => {
+  const section = renderMembersSection([])
+  assert.match(section, /\| （未记录） \| — \| — \| — \|/)
+  assert.match(renderMembersSection(null), /（未记录）/)
 })
 
 test('空 entry / 非对象入参不抛错', () => {

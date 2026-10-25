@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { resolveRoute, summarizeBatch } from '../lib/summarize/summarize.js'
-import { buildUserPrompt, buildFallbackText } from '../lib/summarize/prompt.js'
+import { buildUserPrompt, buildFallbackText, buildDetailSystemPrompt } from '../lib/summarize/prompt.js'
 import { fakeLlm, fakeCtx, silentLogger } from './helpers.js'
 
 const recs = [
@@ -171,4 +171,26 @@ test('buildUserPrompt 历史超出 maxHistoryChars 预算时从最旧的开始�
   })
   assert.equal(text.includes('A'.repeat(600)), false)
   assert.match(text, /B{100}/)
+})
+
+test('buildDetailSystemPrompt 要求「高频词条」小节并排在要点之前', () => {
+  const sp = buildDetailSystemPrompt()
+  assert.match(sp, /高频词条/)
+  assert.ok(sp.indexOf('## 高频词条') < sp.indexOf('## 要点'), '高频词条小节必须排在要点小节之前')
+  assert.match(sp, /5–10 个/)
+})
+
+test('buildDetailSystemPrompt 声明 ==高亮== 与 @@强调@@ 两种标记语法', () => {
+  const sp = buildDetailSystemPrompt()
+  assert.match(sp, /==文字==/)
+  assert.match(sp, /@@文字@@/)
+  assert.match(sp, /不超过 8 处/)
+  assert.match(sp, /不超过 4 处/)
+})
+
+test('buildDetailSystemPrompt 要求模型输出 FOCUS 注释块且不写成员表', () => {
+  const sp = buildDetailSystemPrompt()
+  assert.match(sp, /FOCUS/)
+  assert.match(sp, /15 个字以内/)
+  assert.match(sp, /不要自己生成成员表/)
 })

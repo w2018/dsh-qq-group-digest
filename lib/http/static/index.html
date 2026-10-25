@@ -146,7 +146,8 @@
         <div class="qd-label">要监听的群 <code>listen.groups</code></div>
         <div class="qd-control">
           <div class="qd-inline">
-            <input class="qd-input" id="group-input" list="group-options" placeholder="输入群号后回车，或从下方已加入的群选择">
+            <input class="qd-input" id="group-input" list="group-options" placeholder="输入群号后回车，或从下拉里选">
+            <select class="qd-select" id="group-picker" style="flex:0 1 240px;min-width:180px"><option value="">从群列表选择…</option></select>
             <button class="qd-btn ghost sm" type="button" id="group-add">添加</button>
           </div>
           <datalist id="group-options"></datalist>
@@ -340,7 +341,8 @@
         <div class="qd-label">接收好友 <code>delivery.friends</code></div>
         <div class="qd-control">
           <div class="qd-inline">
-            <input class="qd-input" id="friend-input" list="friend-options" placeholder="输入 QQ 号后回车，或从好友列表选择">
+            <input class="qd-input" id="friend-input" list="friend-options" placeholder="输入 QQ 号后回车，或从下拉里选">
+            <select class="qd-select" id="friend-picker" style="flex:0 1 240px;min-width:180px"><option value="">从好友列表选择…</option></select>
             <button class="qd-btn ghost sm" type="button" id="friend-add">添加</button>
           </div>
           <datalist id="friend-options"></datalist>
@@ -664,6 +666,7 @@
         redrawExcludeGroups()
       },
     })
+    refreshGroupPicker()
   }
 
   function redrawKeywords() {
@@ -687,6 +690,75 @@
         redrawFriends()
       },
     })
+    refreshFriendPicker()
+  }
+
+  /**
+   * 重填「从群列表选择」下拉。已加入 listen.groups 的群直接跳过不渲染，
+   * 免得下拉里一半是点不动的死项。拉不到群列表时禁用并说明原因。
+   */
+  function refreshGroupPicker() {
+    var sel = $('#group-picker')
+    if (!sel) return
+    sel.textContent = ''
+    // settings 里的群号可能是数字，统一按字符串比较
+    var chosen = groups().map(function (x) { return String(x) })
+    var rest = state.groups.filter(function (g) {
+      return chosen.indexOf(String(g.groupId)) < 0
+    })
+    if (rest.length === 0) {
+      var empty = el('option', null, state.groups.length === 0
+        ? '（协议端未连接，无法拉取群列表）'
+        : '（群列表里的群都已加入）')
+      empty.value = ''
+      sel.appendChild(empty)
+      sel.disabled = true
+      return
+    }
+    var head = el('option', null, '从群列表选择…')
+    head.value = ''
+    sel.appendChild(head)
+    rest.forEach(function (g) {
+      var gid = String(g.groupId)
+      var gname = String(g.groupName || '').trim()
+      var opt = el('option', null, gname ? gname + '（' + gid + '）' : gid)
+      opt.value = gid
+      sel.appendChild(opt)
+    })
+    sel.disabled = false
+    sel.value = ''
+  }
+
+  /** 重填「从好友列表选择」下拉，规则同 refreshGroupPicker。 */
+  function refreshFriendPicker() {
+    var sel = $('#friend-picker')
+    if (!sel) return
+    sel.textContent = ''
+    var chosen = friends().map(function (x) { return String(x) })
+    var rest = state.friends.filter(function (f) {
+      return chosen.indexOf(String(f.userId)) < 0
+    })
+    if (rest.length === 0) {
+      var empty = el('option', null, state.friends.length === 0
+        ? '（协议端未连接，无法拉取好友列表）'
+        : '（好友列表里的人都已经加入）')
+      empty.value = ''
+      sel.appendChild(empty)
+      sel.disabled = true
+      return
+    }
+    var head = el('option', null, '从好友列表选择…')
+    head.value = ''
+    sel.appendChild(head)
+    rest.forEach(function (f) {
+      var uid = String(f.userId)
+      var nick = String(f.nickname || f.remark || uid).trim()
+      var opt = el('option', null, nick + '（' + uid + '）')
+      opt.value = uid
+      sel.appendChild(opt)
+    })
+    sel.disabled = false
+    sel.value = ''
   }
 
   function redrawExcluded() {
@@ -758,12 +830,13 @@
         dl.appendChild(opt)
       })
       $('#group-hint').textContent = state.groups.length > 0
-        ? '至少配置一个群号。已从 NapCat 拉到 ' + state.groups.length + ' 个群，可在输入框里直接选。'
+        ? '至少配置一个群号。已从 NapCat 拉到 ' + state.groups.length + ' 个群，可直接从右侧下拉选。'
         : (data.error ? '拉取群列表失败：' + data.error : '至少配置一个群号，否则插件不会启动管线。')
       redrawGroups()
       redrawExcludeGroups()
     } catch (error) {
       $('#group-hint').textContent = '拉取群列表失败：' + error.message
+      refreshGroupPicker()
     }
   }
 
@@ -782,6 +855,7 @@
       redrawFriends()
     } catch (error) {
       redrawFriends()
+      refreshFriendPicker()
     }
   }
 
@@ -966,9 +1040,15 @@
         groups.forEach(function (g) {
           var row = el('div', 'qd-progress')
           var name = el('div', 'qd-progress-name')
-          name.textContent = (g.groupName || '未命名群') + ' '
-          var code = el('code', null, g.groupId)
-          name.appendChild(code)
+          var gname = String(g.groupName || '').trim()
+          if (gname) {
+            name.appendChild(document.createTextNode(gname + '（'))
+            name.appendChild(el('code', null, String(g.groupId)))
+            name.appendChild(document.createTextNode('）'))
+          } else {
+            // 拿不到群名时只显示群号，不写占位词
+            name.appendChild(el('code', null, String(g.groupId)))
+          }
           row.appendChild(name)
           var pct = g.threshold > 0 ? Math.min(100, Math.round((g.pending / g.threshold) * 100)) : 0
           var badge = el('span', 'qd-badge ' + (g.pending >= g.threshold ? 'ok' : ''), g.pending + ' / ' + g.threshold)
@@ -1379,6 +1459,39 @@
     redrawFriends()
     updateCardSums()
   }, 'delivery.friends')
+
+  // 真下拉选群：选中即加入并立刻重画（含成员排除的群选择器），然后把 select 复位。
+  $('#group-picker').addEventListener('change', function () {
+    var value = String(this.value || '').trim()
+    this.value = ''
+    if (!value) return
+    var list = groups().slice()
+    if (!addUnique(list, value)) {
+      toast('「' + value + '」已经在列表里了')
+      return
+    }
+    setPath(state.settings, 'listen.groups', list)
+    markDirty('listen.groups')
+    redrawGroups()
+    redrawExcludeGroups()
+    updateCardSums()
+  })
+
+  // 真下拉选好友：同上。
+  $('#friend-picker').addEventListener('change', function () {
+    var value = String(this.value || '').trim()
+    this.value = ''
+    if (!value) return
+    var list = friends().slice()
+    if (!addUnique(list, value)) {
+      toast('「' + value + '」已经在列表里了')
+      return
+    }
+    setPath(state.settings, 'delivery.friends', list)
+    markDirty('delivery.friends')
+    redrawFriends()
+    updateCardSums()
+  })
 
   $('#exclude-group').addEventListener('change', function () {
     state.memberGroup = this.value

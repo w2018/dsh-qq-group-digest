@@ -20,7 +20,7 @@
   </div>
 </div>
 
-<main class="qd-main qd-main-wide">
+<main class="qd-main qd-main-wide qd-main-fixed">
   <div class="qd-page-head">
     <h1 class="qd-page-title">总结记录</h1>
     <p class="qd-page-sub" id="sum-sub">正在加载…</p>
@@ -36,9 +36,21 @@
         </select>
         <input class="qd-input" id="f-keyword" placeholder="搜索总结正文…">
       </div>
+
+      <!-- 批量操作条：选中任意一条后出现 -->
+      <div class="qd-sumbulk" id="bulk-bar" style="display:none">
+        <span class="qd-sumbulk-count" id="bulk-count">已选 0 条</span>
+        <span class="qd-grow"></span>
+        <button class="qd-btn ghost xs" type="button" id="btn-bulk-export">导出选中</button>
+        <button class="qd-btn danger xs" type="button" id="btn-bulk-delete">删除选中</button>
+        <button class="qd-btn ghost xs" type="button" id="btn-bulk-clear">取消选择</button>
+      </div>
+
       <div class="qd-sumlist" id="sum-list"></div>
       <div class="qd-sumsidfoot">
         <button class="qd-btn ghost sm" type="button" id="btn-more" style="display:none">加载更多</button>
+        <button class="qd-btn ghost sm" type="button" id="btn-collapse-all">全部折叠</button>
+        <button class="qd-btn ghost sm" type="button" id="btn-expand-all">全部展开</button>
       </div>
     </aside>
 
@@ -55,6 +67,7 @@
           <button class="qd-btn ghost sm" type="button" id="btn-copy">复制</button>
           <button class="qd-btn ghost sm" type="button" id="btn-download">下载 .md</button>
           <button class="qd-btn ghost sm" type="button" id="btn-raw">原始文本</button>
+          <button class="qd-btn danger sm" type="button" id="btn-del">删除这条</button>
         </div>
       </div>
       <div class="qd-sumview" id="sum-view"></div>
@@ -78,10 +91,13 @@
     offset: 0,
     hasMore: false,
     loading: false,
+    busy: false,
     current: null,
     currentDetail: null,
     rawMode: false,
     aiDetail: null,
+    selected: {},
+    collapsed: {},
     filter: { groupId: '', keyword: '' },
   }
 
@@ -107,6 +123,15 @@
     return data || {}
   }
 
+  /** 写接口统一走这里：JSON 进、JSON 出，401 跳登录。 */
+  async function postJson(path, body) {
+    return api(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    })
+  }
+
   function toast(text, kind) {
     var box = $('#toasts')
     var node = el('div', 'qd-toast ' + (kind || ''), text)
@@ -119,19 +144,30 @@
 
   function pad2(n) { return n < 10 ? '0' + n : String(n) }
 
-  function dayTime(ms) {
-    var d = new Date(Number(ms) || 0)
+  /**
+   * 存档里的时间戳是「秒」（history 条目 at / firstSec / lastSec），
+   * 但接口也可能回毫秒，这里统一成毫秒再交给 Date。
+   */
+  function toMs(value) {
+    var n = Number(value) || 0
+    return n > 0 && n < 1e11 ? n * 1000 : n
+  }
+
+  function dayTime(value) {
+    var d = new Date(toMs(value))
     if (isNaN(d.getTime())) return ''
     return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
       ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes())
   }
 
-  /** 群标题统一用「群名（群号）」；群名为空时退回群号。 */
+  /** 群标题统一用「群名（群号）」；群名为空时只显示群号。 */
   function groupLabel(groupName, groupId) {
     var name = String(groupName || '').trim()
     var id = String(groupId || '').trim()
     if (name && id) return name + '（' + id + '）'
-    return name || id || '未知群'
+    if (id) return id
+    if (name) return name
+    return '（无群号）'
   }
 
   function renderState(target, kind, text) {
@@ -164,19 +200,59 @@
     }
   }
 
-  // ── 列表：按群分组，每组下挂该群的记录 ───────────────────
+  // ── 选择：key 用「群号/批次」保证唯一 ──────────────────────
 
-  function renderList() {
-    var list = $('#sum-list')
-    list.textContent = ''
-    if (state.items.length === 0) {
-      renderState(list, 'empty', state.filter.groupId || state.filter.keyword
-        ? '没有匹配的总结记录。换个关键词，或者清空筛选。'
-        : '还没有总结记录。群里消息达到阈值、或者点「立即总结」之后，每个群的结果会分别出现在这里。')
-      $('#btn-more').style.display = 'none'
-      return
-    }
+  function keyOf(item) {
+    return String(item.groupId || '') + '/' + String(item.batchId || '')
+  }
 
+  function selectedList() {
+    var out = []
+    state.items.forEach(function (item) {
+      if (state.selected[keyOf(item)]) out.push({ groupId: item.groupId, batchId: item.batchId })
+    })
+    return out
+  }
+
+  function selectedCount() {
+    return selectedList().length
+  }
+
+  function clearSelection() {
+    state.selected = {}
+    renderList()
+  }
+
+  function updateBulk() {
+    var count = selectedCount()
+    var bar = $('#bulk-bar')
+    if (!bar) return
+    bar.style.display = count > 0 ? 'flex' : 'none'
+    $('#bulk-count').textContent = '已选 ' + count + ' 条'
+  }
+
+  function toggleSelect(item, on) {
+    var key = keyOf(item)
+    if (on) state.selected[key] = true
+    else delete state.selected[key]
+  }
+
+  function setBusy(on, label) {
+    state.busy = !!on
+    var ids = ['#btn-bulk-export', '#btn-bulk-delete', '#btn-bulk-clear', '#btn-del', '#btn-more']
+    ids.forEach(function (sel) {
+      var node = $(sel)
+      if (node) node.disabled = !!on
+    })
+    var exportBtn = $('#btn-bulk-export')
+    var deleteBtn = $('#btn-bulk-delete')
+    if (exportBtn) exportBtn.textContent = on && label === 'export' ? '导出中…' : '导出选中'
+    if (deleteBtn) deleteBtn.textContent = on && label === 'delete' ? '删除中…' : '删除选中'
+  }
+
+  // ── 列表：按群分组，每组可折叠、可全选 ─────────────────────
+
+  function groupBuckets() {
     // items 已按时间倒序；这里再按群聚拢，保持「最近有动静的群」排前面。
     var order = []
     var buckets = {}
@@ -189,26 +265,93 @@
       if (!buckets[gid].groupName && item.groupName) buckets[gid].groupName = item.groupName
       buckets[gid].items.push(item)
     })
+    return { order: order, buckets: buckets }
+  }
 
+  function renderList() {
+    var list = $('#sum-list')
+    list.textContent = ''
+    if (state.items.length === 0) {
+      renderState(list, 'empty', state.filter.groupId || state.filter.keyword
+        ? '没有匹配的总结记录。换个关键词，或者清空筛选。'
+        : '还没有总结记录。群里消息达到阈值、或者点「立即总结」之后，每个群的结果会分别出现在这里。')
+      $('#btn-more').style.display = 'none'
+      updateBulk()
+      return
+    }
+
+    var grouped = groupBuckets()
     var frag = document.createDocumentFragment()
-    order.forEach(function (gid) {
-      var bucket = buckets[gid]
+
+    grouped.order.forEach(function (gid) {
+      var bucket = grouped.buckets[gid]
+      var collapsed = !!state.collapsed[gid]
+
       var head = el('div', 'qd-sumgroup')
+      head.title = collapsed ? '展开这个群' : '折叠这个群'
+
+      var headCheck = el('input')
+      headCheck.type = 'checkbox'
+      headCheck.className = 'qd-check-input'
+      var picked = bucket.items.filter(function (item) { return state.selected[keyOf(item)] }).length
+      headCheck.checked = picked > 0 && picked === bucket.items.length
+      headCheck.indeterminate = picked > 0 && picked < bucket.items.length
+      headCheck.title = '全选这个群的记录'
+      headCheck.addEventListener('click', function (event) {
+        event.stopPropagation()
+        var on = this.checked
+        bucket.items.forEach(function (item) { toggleSelect(item, on) })
+        renderList()
+      })
+      head.appendChild(headCheck)
+
+      var arrow = el('span', 'qd-sumgroup-arrow', collapsed ? '▸' : '▾')
+      head.appendChild(arrow)
       head.appendChild(el('span', 'qd-sumgroup-name', groupLabel(bucket.groupName, bucket.groupId)))
-      head.appendChild(el('span', 'qd-hint', bucket.items.length + ' 条'))
+      head.appendChild(el('span', 'qd-sumgroup-count', bucket.items.length + ' 条'))
+      head.addEventListener('click', function () {
+        if (collapsed) delete state.collapsed[gid]
+        else state.collapsed[gid] = true
+        renderList()
+      })
       frag.appendChild(head)
 
+      if (collapsed) return
+
       bucket.items.forEach(function (item) {
-        var row = el('button', 'qd-sumitem')
-        row.type = 'button'
+        var key = keyOf(item)
+        var row = el('div', 'qd-sumitem')
         row.dataset.groupId = item.groupId
         row.dataset.batchId = item.batchId
+        row.tabIndex = 0
+        row.setAttribute('role', 'button')
+        if (state.selected[key]) row.classList.add('checked')
         if (state.current && state.current.groupId === item.groupId && state.current.batchId === item.batchId) {
           row.classList.add('active')
         }
+
         var top = el('span', 'qd-sumitem-top')
+        var box = el('input')
+        box.type = 'checkbox'
+        box.className = 'qd-check-input'
+        box.checked = !!state.selected[key]
+        box.title = '选择这条记录'
+        box.addEventListener('click', function (event) {
+          event.stopPropagation()
+          toggleSelect(item, this.checked)
+          renderList()
+        })
+        top.appendChild(box)
         top.appendChild(el('span', 'qd-sumitem-time', dayTime(item.at)))
+        if (item.aiDetail === true) {
+          var ai = el('span', 'qd-badge accent qd-badge-ai', 'AI')
+          ai.title = 'AI 精细总结'
+          top.appendChild(ai)
+        } else {
+          top.appendChild(el('span', 'qd-sumitem-local', '本地'))
+        }
         row.appendChild(top)
+
         var meta = el('span', 'qd-sumitem-meta')
         meta.appendChild(el('span', 'qd-badge ' + (item.ok ? 'ok' : 'err'), item.ok ? '成功' : '失败'))
         meta.appendChild(el('span', 'qd-hint', item.count + ' 条'))
@@ -216,14 +359,22 @@
         if (item.failed) meta.appendChild(el('span', 'qd-badge warn', '失败 ' + item.failed))
         row.appendChild(meta)
         row.appendChild(el('span', 'qd-sumitem-preview', item.preview || '（无预览）'))
+
         row.addEventListener('click', function () {
+          select(item.groupId, item.batchId)
+        })
+        row.addEventListener('keydown', function (event) {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
           select(item.groupId, item.batchId)
         })
         frag.appendChild(row)
       })
     })
+
     list.appendChild(frag)
     $('#btn-more').style.display = state.hasMore ? 'inline-flex' : 'none'
+    updateBulk()
   }
 
   function markActive() {
@@ -360,11 +511,13 @@
       if (item.batchId) metaParts.push('批次 ' + item.batchId)
       if (item.model) metaParts.push(item.model)
       if (item.aiDetail === true) metaParts.push('AI 精细总结')
+      else metaParts.push('本地渲染')
       if (item.delivered != null) metaParts.push('已送达 ' + item.delivered)
       if (item.failed) metaParts.push('失败 ' + item.failed)
       if (item.ok === false) metaParts.push('这一批总结失败')
       $('#sum-meta').textContent = metaParts.join(' · ')
       renderMarkdownInto($('#sum-view'), md)
+      renderParticipants($('#sum-view'), item.participants)
       $('#sum-raw').textContent = md
       updateNavButtons()
     } catch (error) {
@@ -392,6 +545,49 @@
       links[i].target = '_blank'
       links[i].rel = 'noopener noreferrer'
     }
+  }
+
+  /** 参与成员表：本次总结里谁说了话、说了多少、重点是什么。 */
+  function renderParticipants(target, participants) {
+    var list = Array.isArray(participants) ? participants : []
+    var box = el('div', 'qd-partbox')
+    var title = el('div', 'qd-partbox-head')
+    title.appendChild(el('strong', null, '参与成员'))
+    title.appendChild(el('span', 'qd-hint', list.length > 0 ? list.length + ' 人' : '（未记录）'))
+    box.appendChild(title)
+
+    if (list.length === 0) {
+      box.appendChild(el('div', 'qd-hint', '（未记录）'))
+      target.appendChild(box)
+      return
+    }
+
+    var wrap = el('div', 'qd-table-wrap')
+    var table = el('table', 'qd-table')
+    var thead = el('thead')
+    var hrow = el('tr')
+    ;['成员', 'QQ', '发言数', '本次重点'].forEach(function (name) {
+      hrow.appendChild(el('th', null, name))
+    })
+    thead.appendChild(hrow)
+    table.appendChild(thead)
+
+    var tbody = el('tbody')
+    list.forEach(function (p) {
+      var tr = el('tr')
+      var name = String((p && p.name) || '')
+      var id = String((p && p.id) || '')
+      tr.appendChild(el('td', null, name || id))
+      tr.appendChild(el('td', 'mono', id))
+      tr.appendChild(el('td', 'num', String((p && p.count) || 0)))
+      var focus = String((p && p.focus) || '').trim()
+      tr.appendChild(el('td', null, focus || '—'))
+      tbody.appendChild(tr)
+    })
+    table.appendChild(tbody)
+    wrap.appendChild(table)
+    box.appendChild(wrap)
+    target.appendChild(box)
   }
 
   function updateNavButtons() {
@@ -429,6 +625,25 @@
     return ok
   }
 
+  function downloadText(name, text, type) {
+    var blob = new Blob([String(text)], { type: type || 'text/markdown;charset=utf-8' })
+    var url = URL.createObjectURL(blob)
+    var a = document.createElement('a')
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(function () { URL.revokeObjectURL(url) }, 4000)
+  }
+
+  function stampName(prefix, at) {
+    var stamp = new Date(toMs(at) || Date.now())
+    if (isNaN(stamp.getTime())) stamp = new Date()
+    return prefix + '-' + stamp.getFullYear() + pad2(stamp.getMonth() + 1) + pad2(stamp.getDate()) +
+      '-' + pad2(stamp.getHours()) + pad2(stamp.getMinutes())
+  }
+
   $('#btn-copy').addEventListener('click', async function () {
     var md = state.currentDetail && state.currentDetail.md
     if (!md) {
@@ -449,19 +664,8 @@
       toast('还没有可下载的内容')
       return
     }
-    var stamp = detail.at ? new Date(detail.at) : new Date()
-    var name = 'qq-digest-' + String(detail.groupId || 'group') + '-' +
-      stamp.getFullYear() + pad2(stamp.getMonth() + 1) + pad2(stamp.getDate()) + '-' +
-      pad2(stamp.getHours()) + pad2(stamp.getMinutes()) + '.md'
-    var blob = new Blob([String(detail.md)], { type: 'text/markdown;charset=utf-8' })
-    var url = URL.createObjectURL(blob)
-    var a = document.createElement('a')
-    a.href = url
-    a.download = name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(function () { URL.revokeObjectURL(url) }, 4000)
+    var name = stampName('qq-digest-' + String(detail.groupId || 'group'), detail.at) + '.md'
+    downloadText(name, String(detail.md))
     toast('已下载 ' + name, 'ok')
   })
 
@@ -479,6 +683,110 @@
 
   $('#btn-prev').addEventListener('click', function () { step(-1) })
   $('#btn-next').addEventListener('click', function () { step(1) })
+
+  // ── 批量：导出选中 / 删除选中 ─────────────────────────────
+
+  $('#btn-bulk-export').addEventListener('click', async function () {
+    var items = selectedList()
+    if (items.length === 0) return
+    setBusy(true, 'export')
+    try {
+      var data = await postJson('/api/summaries/export', { items: items })
+      var markdown = String(data.markdown || '')
+      if (!markdown) {
+        toast('后端没有返回可导出的内容', 'err')
+        return
+      }
+      var name = String(data.filename || '') || (stampName('qq-digest-export', Date.now()) + '.md')
+      downloadText(name, markdown)
+      toast('已导出 ' + Number(data.count || items.length) + ' 条到 ' + name, 'ok')
+    } catch (error) {
+      toast('导出失败：' + error.message, 'err')
+    } finally {
+      setBusy(false)
+    }
+  })
+
+  $('#btn-bulk-delete').addEventListener('click', async function () {
+    var items = selectedList()
+    if (items.length === 0) return
+    var ok = false
+    try {
+      ok = window.confirm('确定删除选中的 ' + items.length + ' 条总结记录吗？\n删除后无法恢复，但这个群的原始消息不受影响。')
+    } catch (e) {
+      ok = false
+    }
+    if (!ok) return
+    setBusy(true, 'delete')
+    try {
+      var data = await postJson('/api/summaries/delete', { items: items })
+      var deleted = Number(data.deleted || 0)
+      toast('已删除 ' + deleted + ' 条记录', 'ok')
+      state.selected = {}
+      state.current = null
+      state.currentDetail = null
+      $('#sum-head').style.display = 'none'
+      await loadList(true)
+    } catch (error) {
+      toast('删除失败：' + error.message, 'err')
+    } finally {
+      setBusy(false)
+    }
+  })
+
+  $('#btn-bulk-clear').addEventListener('click', function () {
+    clearSelection()
+  })
+
+  // ── 详情页：删除这一条 ───────────────────────────────────
+
+  $('#btn-del').addEventListener('click', async function () {
+    var detail = state.currentDetail
+    if (!detail) {
+      toast('先选中一条记录')
+      return
+    }
+    var label = groupLabel(detail.groupName, detail.groupId) + ' · ' + dayTime(detail.at)
+    var ok = false
+    try {
+      ok = window.confirm('确定删除这条总结记录吗？\n' + label + '\n删除后无法恢复。')
+    } catch (e) {
+      ok = false
+    }
+    if (!ok) return
+    var btn = this
+    btn.disabled = true
+    btn.textContent = '删除中…'
+    try {
+      await postJson('/api/summaries/delete', {
+        items: [{ groupId: detail.groupId, batchId: detail.batchId }],
+      })
+      toast('已删除这条记录', 'ok')
+      state.current = null
+      state.currentDetail = null
+      $('#sum-head').style.display = 'none'
+      setDetailVisible(false)
+      await loadList(true)
+    } catch (error) {
+      toast('删除失败：' + error.message, 'err')
+    } finally {
+      btn.disabled = false
+      btn.textContent = '删除这条'
+    }
+  })
+
+  // ── 折叠 / 展开全部 ──────────────────────────────────────
+
+  $('#btn-collapse-all').addEventListener('click', function () {
+    var grouped = groupBuckets()
+    grouped.order.forEach(function (gid) { state.collapsed[gid] = true })
+    renderList()
+  })
+
+  $('#btn-expand-all').addEventListener('click', function () {
+    state.collapsed = {}
+    renderList()
+  })
 
   // ── 筛选 ──────────────────────────────────────────────────
 

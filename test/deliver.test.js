@@ -84,6 +84,18 @@ test('renderGroupReport 只包含单个群', () => {
   assert.ok(!text.includes('群号 222'))
 })
 
+test('renderGroupReport 群名缺失时回退群号，不出现「未命名」', () => {
+  const text = renderGroupReport({ groupId: '333', groupName: '', ok: true, text: 'C 的总结', count: 5 })
+  assert.match(text, /333（群号 333）/)
+  assert.ok(!text.includes('未命名'), '不得出现「未命名群」占位')
+})
+
+test('renderReport 群名缺失时同样回退群号', () => {
+  const text = renderReport([{ groupId: '444', groupName: '   ', ok: true, text: 'D 的总结', count: 2 }])
+  assert.match(text, /1\. 444（群号 444）/)
+  assert.ok(!text.includes('未命名'))
+})
+
 test('renderGroupReport 失败时带错误并保留摘录', () => {
   const text = renderGroupReport({ groupId: '222', groupName: '群B', ok: false, text: 'B 的摘录', count: 50, error: '超时' })
   assert.match(text, /总结失败：超时/)

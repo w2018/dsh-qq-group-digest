@@ -322,6 +322,16 @@ a:hover { text-decoration: underline; }
 
 .qd-check input { width: 15px; height: 15px; accent-color: var(--qd-accent); cursor: pointer; margin: 0; }
 
+/* 列表行 / 组头的独立复选框（不在 label 里） */
+.qd-check-input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--qd-accent);
+  cursor: pointer;
+}
+
 /* 开关 */
 .qd-switch {
   position: relative;
@@ -394,6 +404,8 @@ a:hover { text-decoration: underline; }
 .qd-btn.ghost:hover { background: var(--qd-bg-hover); color: var(--qd-text); }
 
 .qd-btn.sm { padding: 4px 9px; font-size: 12px; }
+
+.qd-btn.xs { padding: 2px 7px; font-size: 11.5px; border-radius: 6px; }
 
 /* ── 徽章 ─────────────────────────────────────────────────── */
 
@@ -939,6 +951,21 @@ a:hover { text-decoration: underline; }
 .qd-md em { font-style: italic; }
 .qd-md del { color: var(--qd-text-faint); }
 
+/* ==高亮== 与 @@强调@@（由 md.js 渲染成 mark / span） */
+.qd-md-mark {
+  background: #fde68a;
+  color: #422006;
+  padding: 0 .18em;
+  border-radius: 3px;
+}
+
+.qd-md-key { color: #dc2626; font-weight: 650; }
+
+@media (prefers-color-scheme: dark) {
+  .qd-md-mark { background: #a16207; color: #fffbeb; }
+  .qd-md-key { color: #f87171; }
+}
+
 .qd-md .qd-md-raw { white-space: pre-wrap; font-family: var(--qd-mono); font-size: 12.5px; }
 
 /* ── 登录页 ───────────────────────────────────────────────── */
@@ -1162,24 +1189,31 @@ a:hover { text-decoration: underline; }
 
 .qd-main-wide { max-width: 1360px; }
 
+/* 总结记录页自己算高度，底部不再留固定操作条的空位 */
+.qd-main-fixed { padding-bottom: 24px; }
+
 .qd-sumlayout {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
+  /* 两栏等高：左列表与右预览顶部对齐、底部也齐 */
+  align-items: stretch;
+  /* 顶栏 52 + 主区上内边距 20 + 页头 44 + 下内边距 24 ≈ 142 */
+  height: calc(100vh - var(--qd-topbar-h) - 142px);
+  min-height: 460px;
 }
 
 .qd-sumside {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   background: var(--qd-bg-elev);
   border: 1px solid var(--qd-border);
   border-radius: var(--qd-radius);
   box-shadow: var(--qd-shadow);
   overflow: hidden;
-  max-height: calc(100vh - var(--qd-topbar-h) - 96px);
-  position: sticky;
-  top: calc(var(--qd-topbar-h) + 16px);
+  height: 100%;
+  min-height: 0;
 }
 
 .qd-sumfilters {
@@ -1195,20 +1229,61 @@ a:hover { text-decoration: underline; }
   border-top: 1px solid var(--qd-border);
   display: flex;
   justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-/* 群分组小标题 */
+/* 批量操作条：选中记录后从筛选条下面滑出 */
+.qd-sumbulk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  background: var(--qd-accent-weak);
+  border-bottom: 1px solid var(--qd-border);
+}
+
+.qd-sumbulk-count {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--qd-accent);
+  white-space: nowrap;
+}
+
+/* 群分组小标题：可点击折叠，与右侧详情头等高 */
 .qd-sumgroup {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px 6px;
+  gap: 7px;
+  height: 38px;
+  padding: 0 10px 0 12px;
   background: var(--qd-bg-sunken);
   border-bottom: 1px solid var(--qd-border);
   border-top: 1px solid var(--qd-border);
   position: sticky;
   top: 0;
   z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.qd-sumgroup:hover { background: var(--qd-bg-hover); }
+
+.qd-sumgroup-arrow {
+  flex: 0 0 auto;
+  width: 10px;
+  font-size: 10px;
+  color: var(--qd-text-faint);
+  text-align: center;
+}
+
+.qd-sumgroup-count {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--qd-text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .qd-sumgroup-name {
@@ -1231,17 +1306,36 @@ a:hover { text-decoration: underline; }
   font-size: 11px;
 }
 
+/* 列表行的复选框：把行首留出来 */
+.qd-sumitem > .qd-sumitem-top > .qd-check-input { margin-right: 1px; }
+
+.qd-sumitem.checked { background: var(--qd-accent-weak); }
+
+/* AI 精细总结徽章：比普通 accent 徽章更醒目 */
+.qd-badge-ai {
+  font-weight: 700;
+  letter-spacing: .04em;
+  border: 1px solid var(--qd-accent);
+}
+
+.qd-sumitem-local {
+  font-size: 10.5px;
+  color: var(--qd-text-faint);
+  white-space: nowrap;
+}
+
 /* 右侧预览 */
 .qd-sumpanel {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   background: var(--qd-bg-elev);
   border: 1px solid var(--qd-border);
   border-radius: var(--qd-radius);
   box-shadow: var(--qd-shadow);
   overflow: hidden;
-  min-height: 420px;
 }
 
 .qd-sumpanelhead {
@@ -1249,9 +1343,11 @@ a:hover { text-decoration: underline; }
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 9px 12px;
+  min-height: 38px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--qd-border);
   background: var(--qd-bg-elev);
+  flex: 0 0 auto;
 }
 
 .qd-sumpaneltitle {
@@ -1273,16 +1369,16 @@ a:hover { text-decoration: underline; }
 .qd-sumview {
   padding: 20px 24px 28px;
   overflow-y: auto;
-  max-height: calc(100vh - var(--qd-topbar-h) - 150px);
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .qd-sumraw {
   margin: 0;
   padding: 18px 22px 26px;
   overflow: auto;
-  max-height: calc(100vh - var(--qd-topbar-h) - 150px);
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--qd-mono);
@@ -1291,16 +1387,47 @@ a:hover { text-decoration: underline; }
   color: var(--qd-text-dim);
 }
 
+/* 详情页：参与成员表（放在 Markdown 正文之后） */
+.qd-partbox {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--qd-border-strong);
+}
+
+.qd-partbox-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.qd-partbox-head strong { font-size: 13.5px; font-weight: 650; }
+
+.qd-partbox .qd-table-wrap { max-height: 300px; overflow-y: auto; }
+
+.qd-partbox .qd-table td.mono {
+  font-family: var(--qd-mono);
+  font-size: 11.5px;
+  color: var(--qd-text-faint);
+  white-space: nowrap;
+}
+
 .qd-back { display: none; }
 
 @media (max-width: 900px) {
-  .qd-sumlayout { grid-template-columns: minmax(0, 1fr); }
+  .qd-sumlayout {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    min-height: 0;
+  }
   .qd-sumside {
     position: static;
-    max-height: 320px;
+    height: auto;
+    max-height: 60vh;
   }
-  .qd-sumview, .qd-sumraw { max-height: none; }
-  .qd-sumpanel { min-height: 260px; }
+  .qd-sumlist { max-height: 44vh; }
+  .qd-sumview, .qd-sumraw { max-height: none; overflow-y: visible; }
+  .qd-sumpanel { min-height: 260px; height: auto; }
 
   /* 窄屏：列表与预览切换显示，选了某条就切到预览 */
   .qd-sumlayout.showing-detail .qd-sumside { display: none; }

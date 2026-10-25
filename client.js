@@ -721,6 +721,11 @@ window.__ModuleLoader__.load({
         const k = String(g.groupId)
         if (!groupMap[k] && g.groupName) groupMap[k] = g.groupName
       })
+      // 持久化群名表：历史记录里只有群号，协议端列表也未必覆盖全部群，这张表最全。
+      const nameTable = (live && live.groupNames) || (live && live.pipeline && live.pipeline.groupNames) || {}
+      Object.keys(nameTable).forEach(function (k) {
+        if (!groupMap[k] && nameTable[k]) groupMap[k] = String(nameTable[k])
+      })
       const providerOpts = models.providers || []
       const currentProvider = (form.model && form.model.provider) || ''
       const modelOptions = (providerOpts.find(function (p) { return String(p.id) === String(currentProvider) }) || {}).models || []

@@ -168,10 +168,16 @@ test('P4 结构化字段：participants/md/model/attempts/aiDetail 正常读写�
     attempts: 2,
     aiDetail: true,
   })
-  assert.deepEqual(item.participants, [
-    { id: '123456', name: '王五', count: 7 },
-    { id: '654321', name: '张三', count: 3 },
-  ])
+  // 逐字段断言而不是 deepEqual：participants 后续还会加字段（如 focus），
+  // 整对象比较会让「别人加了个新字段」变成假失败。
+  assert.equal(item.participants.length, 2)
+  assert.deepEqual(
+    item.participants.map((p) => [p.id, p.name, p.count]),
+    [
+      ['123456', '王五', 7],
+      ['654321', '张三', 3],
+    ],
+  )
   assert.match(item.md, /^# 100000001/)
   assert.equal(item.model, 'workbuddy/deepseek-v4.1-flash')
   assert.equal(item.attempts, 2)
@@ -234,8 +240,59 @@ test('P4 participants 归一化：丢弃非法项、补齐 name、限制最多 3
   for (let i = 0; i < 40; i += 1) raw.push({ id: String(100 + i), name: 'n' + i, count: i })
   const item = hist.append('1', { text: 't', at: 1700000000, participants: raw })
   assert.equal(item.participants.length, 30)
-  assert.deepEqual(item.participants[0], { id: '7', name: '7', count: 0 })
+  assert.equal(item.participants[0].id, '7')
+  assert.equal(item.participants[0].name, '7')
+  assert.equal(item.participants[0].count, 0)
   assert.equal(item.participants[1].id, '100')
   assert.equal(item.participants[1].count, 0)
   assert.equal(item.participants[29].id, '128')
+})
+
+test('P6 participants 带 focus：超长截断到 40 字、空值归一化为空串', () => {
+  const hist = new SummaryHistory(makeRoot())
+  const item = hist.append('1', {
+    text: 't',
+    at: 1700000000,
+    participants: [
+      { id: '1', name: '甲', count: 2, focus: '  主张本地模型  ' },
+      { id: '2', name: '乙', count: 1, focus: '字'.repeat(60) },
+      { id: '3', name: '丙', count: 1 },
+    ],
+  })
+  assert.equal(item.participants[0].focus, '主张本地模型')
+  assert.equal(item.participants[1].focus.length, 40)
+  assert.equal(item.participants[2].focus, '')
+})
+
+test('remove 按 batchId 删除单条并落盘', () => {
+  const dir = makeRoot()
+  const hist = new SummaryHistory(dir)
+  hist.append('1', { text: 'a', at: 1700000000, batchId: 'b1' })
+  hist.append('1', { text: 'b', at: 1700000100, batchId: 'b2' })
+  assert.equal(hist.remove('1', 'b1'), true)
+  assert.equal(hist.load('1').length, 1)
+  assert.equal(hist.load('1')[0].batchId, 'b2')
+  // 已删过 / 不存在 / 空 id 都返回 false，不抛错
+  assert.equal(hist.remove('1', 'b1'), false)
+  assert.equal(hist.remove('1', 'nope'), false)
+  assert.equal(hist.remove('1', ''), false)
+  // 重新加载（模拟重启）后依然是删掉的状态
+  const again = new SummaryHistory(dir)
+  assert.equal(again.load('1').length, 1)
+  assert.equal(again.load('1')[0].batchId, 'b2')
+})
+
+test('removeAll 清空整群并返回删除条数', () => {
+  const dir = makeRoot()
+  const hist = new SummaryHistory(dir)
+  hist.append('1', { text: 'a', at: 1700000000, batchId: 'b1' })
+  hist.append('1', { text: 'b', at: 1700000100, batchId: 'b2' })
+  hist.append('2', { text: 'c', at: 1700000200, batchId: 'b3' })
+  assert.equal(hist.removeAll('1'), 2)
+  assert.equal(hist.load('1').length, 0)
+  assert.equal(hist.load('2').length, 1, '其它群不受影响')
+  assert.equal(hist.removeAll('1'), 0)
+  const again = new SummaryHistory(dir)
+  assert.equal(again.load('1').length, 0)
+  assert.equal(again.load('2').length, 1)
 })
