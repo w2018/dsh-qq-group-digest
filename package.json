@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-group-digest",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "DeepSeek Harness plugin: watch selected QQ groups over OneBot 11, batch messages by a threshold, summarize each batch with a model already configured in DSH, and deliver per-group reports to chosen friends as QQ private messages. · DSH 插件：监听指定 QQ 群，按阈值批次调用 DSH 已配置模型生成总结，按群组织后私聊推送给指定好友。",
   "type": "module",
   "main": "index.js",

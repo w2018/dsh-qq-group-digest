@@ -6,11 +6,11 @@
 
 DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维度报告
 
-[![version](https://img.shields.io/badge/version-v0.5.1-blue.svg)](#版本信息)
+[![version](https://img.shields.io/badge/version-v0.5.2-blue.svg)](#版本信息)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](#许可)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](https://nodejs.org)
 [![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.1.7--rc.2-7c5cff.svg)](https://github.com/deepseek-ai)
-[![releases](https://img.shields.io/badge/releases-v0.5.1-lightgrey.svg)](https://github.com/w2018/dsh-qq-group-digest/releases)
+[![releases](https://img.shields.io/badge/releases-v0.5.2-lightgrey.svg)](https://github.com/w2018/dsh-qq-group-digest/releases)
 
 [核心配套](#-核心配套luckylilliabot) · [版本信息](#版本信息) · [依赖](#依赖) · [安装使用](#安装使用) · [HTTP 网页服务](#-http-网页服务) · [主要功能](#主要功能) · [数据与目录](#数据与目录)
 
@@ -32,8 +32,8 @@ DeepSeek-Harness 插件 · 按阈值分批 · 走 DSH 已配置模型 · 群维�
 
 | 项 | 值 |
 | :--- | :--- |
-| 当前版本 | **v0.5.1** |
-| 发布日期 | 2026-10-25 |
+| 当前版本 | **v0.5.2** |
+| 发布日期 | 2026-10-26 |
 | npm | [dsh-qq-group-digest](https://www.npmjs.com/package/dsh-qq-group-digest) |
 | 许可 | [MIT](./LICENSE) © w2018 |
 
@@ -82,7 +82,7 @@ Get-NetTCPConnection -State Listen | Where-Object LocalPort -eq 3001
 **方式 A：npm（推荐，版本锁定）**
 
 ```powershell
-dsh plugin --profile desktop add dsh-qq-group-digest@0.5.1
+dsh plugin --profile desktop add dsh-qq-group-digest@0.5.2
 ```
 
 **方式 B：GitHub 源**
