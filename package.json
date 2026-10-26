@@ -1,12 +1,13 @@
 {
   "name": "dsh-qq-group-digest",
   "version": "0.5.1",
-  "description": "DeepSeek-Harness 插件：监听指定 QQ 群消息，按阈值批次调用 DSH 已配置模型生成总结，并按群组织后私聊推送给指定好友。",
+  "description": "DeepSeek Harness plugin: watch selected QQ groups over OneBot 11, batch messages by a threshold, summarize each batch with a model already configured in DSH, and deliver per-group reports to chosen friends as QQ private messages. · DSH 插件：监听指定 QQ 群，按阈值批次调用 DSH 已配置模型生成总结，按群组织后私聊推送给指定好友。",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
@@ -14,24 +15,43 @@
     "client.js",
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "dsh": ">=0.1.7-rc.2",
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "prepublishOnly": "npm test",
+    "pack:check": "npm pack --dry-run"
   },
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
+    "dsh",
     "cordis",
     "napcat",
     "onebot11",
-    "qq"
+    "qq",
+    "qq-group",
+    "summarize"
   ],
   "license": "MIT",
+  "author": "w2018",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/w2018/dsh-qq-group-digest.git"
+  },
+  "homepage": "https://github.com/w2018/dsh-qq-group-digest#readme",
+  "bugs": {
+    "url": "https://github.com/w2018/dsh-qq-group-digest/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
